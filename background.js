@@ -7,7 +7,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'startRecording') {
-        startRecording(message.streamId);
+        startRecording();
     }
 
     if (message.action === 'stopRecording') {
@@ -15,48 +15,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-async function startRecording(streamId) {
+async function startRecording() {
     if (isRecording) return;
-    if (!streamId) {
-        console.error('No streamId provided to startRecording');
-        return;
-    }
 
     try {
-        // 1. We already have the stream ID from the popup
-        // 2. Now create the offscreen document
+        // 1. Create the offscreen document with DISPLAY_MEDIA reason
+        //    This allows the offscreen doc to call getDisplayMedia()
         await setupOffscreenDocument('offscreen.html');
 
-        // 3. Send the stream ID to the offscreen document to start recording
+        // 2. Tell the offscreen document to start recording
+        //    It will call getDisplayMedia() which shows Chrome's screen picker
         chrome.runtime.sendMessage({
             type: 'start-recording',
-            target: 'offscreen',
-            streamId: streamId
+            target: 'offscreen'
         });
-
-        isRecording = true;
 
     } catch (error) {
         console.error('Failed to start recording:', error);
         isRecording = false;
+
+        chrome.runtime.sendMessage({ action: 'recordingFailed' }).catch(() => { });
     }
 }
 
 async function stopRecording() {
     if (!isRecording) return;
 
-    // Send message to offscreen document to stop recording
     chrome.runtime.sendMessage({
         type: 'stop-recording',
         target: 'offscreen'
     });
-
-    isRecording = false;
 }
 
 // Ensure the offscreen document exists
 async function setupOffscreenDocument(path) {
-    // Check if it already exists
     const existingContexts = await chrome.runtime.getContexts({
         contextTypes: ['OFFSCREEN_DOCUMENT'],
         documentUrls: [chrome.runtime.getURL(path)]
@@ -66,12 +58,11 @@ async function setupOffscreenDocument(path) {
         return;
     }
 
-    // Create document
     try {
         await chrome.offscreen.createDocument({
             url: path,
-            reasons: ['USER_MEDIA'],
-            justification: 'Recording from chrome.desktopCapture'
+            reasons: ['DISPLAY_MEDIA'],
+            justification: 'Screen recording via getDisplayMedia'
         });
     } catch (err) {
         if (!err.message.startsWith('Only a single offscreen document may be created.')) {
@@ -80,11 +71,24 @@ async function setupOffscreenDocument(path) {
     }
 }
 
-// Listen for messages from the offscreen document indicating recording ended
+// Listen for messages from the offscreen document
 chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'recording-started') {
+        console.log('Recording started confirmation from offscreen');
+        isRecording = true;
+    }
+
     if (message.type === 'recording-stopped-from-offscreen') {
+        console.log('Recording stopped confirmation from offscreen');
         isRecording = false;
-        // Optionally, close the offscreen document when done to free resources
-        // chrome.offscreen.closeDocument();
+
+        chrome.runtime.sendMessage({ action: 'recordingStopped' }).catch(() => { });
+    }
+
+    if (message.type === 'recording-failed') {
+        console.error('Recording failed in offscreen:', message.error);
+        isRecording = false;
+
+        chrome.runtime.sendMessage({ action: 'recordingFailed' }).catch(() => { });
     }
 });

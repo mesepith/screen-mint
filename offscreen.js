@@ -5,53 +5,42 @@ chrome.runtime.onMessage.addListener(async (message) => {
     if (message.target !== 'offscreen') return;
 
     if (message.type === 'start-recording') {
-        startRecording(message.streamId);
+        startRecording();
     } else if (message.type === 'stop-recording') {
         stopRecording();
     }
 });
 
-async function startRecording(streamId) {
+async function startRecording() {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
         console.log('Already recording');
         return;
     }
 
     try {
-        let stream;
-        try {
-            // First try with both audio and video
-            stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    mandatory: {
-                        chromeMediaSource: 'desktop',
-                        chromeMediaSourceId: streamId
-                    }
-                },
-                video: {
-                    mandatory: {
-                        chromeMediaSource: 'desktop',
-                        chromeMediaSourceId: streamId
-                    }
-                }
-            });
-        } catch (mediaError) {
-            console.warn('Failed to get audio/video stream, trying video only:', mediaError);
-            // Fallback to video only
-            stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    mandatory: {
-                        chromeMediaSource: 'desktop',
-                        chromeMediaSourceId: streamId
-                    }
-                }
-            });
-        }
+        // Use getDisplayMedia() — the standard Web API for screen capture.
+        // In an offscreen document created with DISPLAY_MEDIA reason,
+        // Chrome shows its built-in screen/window/tab picker automatically.
+        // No need for chrome.desktopCapture or chromeMediaSource constraints.
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: false
+        });
+
+        console.log('Got display media stream, tracks:', stream.getTracks().map(t => t.kind));
 
         recordedChunks = [];
 
         // Choose appropriate mimeType based on browser support
-        const options = { mimeType: 'video/webm; codecs=vp9' };
+        let options;
+        if (MediaRecorder.isTypeSupported('video/webm; codecs=vp9')) {
+            options = { mimeType: 'video/webm; codecs=vp9' };
+        } else if (MediaRecorder.isTypeSupported('video/webm; codecs=vp8')) {
+            options = { mimeType: 'video/webm; codecs=vp8' };
+        } else {
+            options = { mimeType: 'video/webm' };
+        }
+
         mediaRecorder = new MediaRecorder(stream, options);
 
         mediaRecorder.ondataavailable = (event) => {
@@ -62,7 +51,7 @@ async function startRecording(streamId) {
 
         mediaRecorder.onstop = () => {
             // Create a Blob from the recorded chunks
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const blob = new Blob(recordedChunks, { type: options.mimeType });
 
             // Create an object URL from the Blob
             const url = URL.createObjectURL(blob);
@@ -96,11 +85,46 @@ async function startRecording(streamId) {
             });
         };
 
-        mediaRecorder.start();
-        console.log('Recording started');
+        // If user stops sharing via Chrome's built-in "Stop sharing" button,
+        // handle it gracefully
+        stream.getVideoTracks()[0].onended = () => {
+            console.log('User stopped sharing via Chrome UI');
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+        };
+
+        mediaRecorder.onerror = (event) => {
+            console.error('MediaRecorder error:', event.error);
+            chrome.runtime.sendMessage({
+                type: 'recording-failed',
+                target: 'background',
+                error: `MediaRecorder error: ${event.error.name}`
+            });
+        };
+
+        mediaRecorder.start(1000); // Collect data every 1 second
+        console.log('Recording started successfully');
+
+        // Notify background that recording has started successfully
+        chrome.runtime.sendMessage({
+            type: 'recording-started',
+            target: 'background'
+        });
 
     } catch (error) {
-        console.error('Error starting recording:', error);
+        console.error('Error starting recording:', error.name, error.message);
+
+        // NotAllowedError = user denied/cancelled the picker
+        const userCancelled = error.name === 'NotAllowedError';
+
+        chrome.runtime.sendMessage({
+            type: 'recording-failed',
+            target: 'background',
+            error: userCancelled
+                ? 'User cancelled screen selection'
+                : `${error.name}: ${error.message}`
+        });
     }
 }
 
@@ -108,5 +132,11 @@ function stopRecording() {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
         console.log('Recording stopped');
+    } else {
+        console.warn('stopRecording called but no active recorder found');
+        chrome.runtime.sendMessage({
+            type: 'recording-stopped-from-offscreen',
+            target: 'background'
+        });
     }
 }
