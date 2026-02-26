@@ -16,9 +16,26 @@ document.addEventListener('DOMContentLoaded', () => {
   startBtn.addEventListener('click', () => {
     startBtn.disabled = true;
     stopBtn.disabled = false;
-    
-    // Tell the background script to start recording
-    chrome.runtime.sendMessage({ action: 'startRecording' });
+
+    // Call chooseDesktopMedia directly from the popup
+    chrome.desktopCapture.chooseDesktopMedia(
+      ['screen', 'window', 'tab', 'audio'],
+      (streamId) => {
+        if (!streamId || chrome.runtime.lastError) {
+          console.error(chrome.runtime.lastError?.message || 'User canceled stream selection');
+          // Reset UI state if canceled
+          startBtn.disabled = false;
+          stopBtn.disabled = true;
+          return;
+        }
+
+        // Tell the background script to start recording with this streamId
+        chrome.runtime.sendMessage({
+          action: 'startRecording',
+          streamId: streamId
+        });
+      }
+    );
   });
 
   stopBtn.addEventListener('click', () => {

@@ -7,7 +7,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'startRecording') {
-        startRecording();
+        startRecording(message.streamId);
     }
 
     if (message.action === 'stopRecording') {
@@ -15,25 +15,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-async function startRecording() {
+async function startRecording(streamId) {
     if (isRecording) return;
+    if (!streamId) {
+        console.error('No streamId provided to startRecording');
+        return;
+    }
 
-    // 1. Get the stream ID using desktopCapture
     try {
-        const streamId = await new Promise((resolve, reject) => {
-            chrome.desktopCapture.chooseDesktopMedia(
-                ['screen', 'window', 'tab'],
-                (streamId) => {
-                    if (!streamId) {
-                        reject(new Error('User canceled stream selection or an error occurred.'));
-                    } else {
-                        resolve(streamId);
-                    }
-                }
-            );
-        });
-
-        // 2. We have the stream ID, now create the offscreen document
+        // 1. We already have the stream ID from the popup
+        // 2. Now create the offscreen document
         await setupOffscreenDocument('offscreen.html');
 
         // 3. Send the stream ID to the offscreen document to start recording

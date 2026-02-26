@@ -18,21 +18,35 @@ async function startRecording(streamId) {
     }
 
     try {
-        // navigator.mediaDevices.getUserMedia requires a streamId mapped via desktopCapture
-        const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: streamId
+        let stream;
+        try {
+            // First try with both audio and video
+            stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    mandatory: {
+                        chromeMediaSource: 'desktop',
+                        chromeMediaSourceId: streamId
+                    }
+                },
+                video: {
+                    mandatory: {
+                        chromeMediaSource: 'desktop',
+                        chromeMediaSourceId: streamId
+                    }
                 }
-            },
-            video: {
-                mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: streamId
+            });
+        } catch (mediaError) {
+            console.warn('Failed to get audio/video stream, trying video only:', mediaError);
+            // Fallback to video only
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    mandatory: {
+                        chromeMediaSource: 'desktop',
+                        chromeMediaSourceId: streamId
+                    }
                 }
-            }
-        });
+            });
+        }
 
         recordedChunks = [];
 
