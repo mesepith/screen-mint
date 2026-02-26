@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Screen Mint</title>
+  <style>
+    body {
+      width: 250px;
+      padding: 16px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      text-align: center;
+      background-color: #FAFAFA;
+      color: #333;
+    }
+    
+    h1 {
+      font-size: 1.2rem;
+      margin-top: 0;
+      margin-bottom: 16px;
+      color: #2196F3;
+    }
+
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+      margin-bottom: 8px;
+      transition: background-color 0.2s, transform 0.1s;
+    }
+    
+    button:active {
+      transform: scale(0.98);
+    }
+
+    #startBtn {
+      background-color: #4CAF50;
+      color: white;
+    }
+    #startBtn:hover {
+      background-color: #45a049;
+    }
+
+    #stopBtn {
+      background-color: #f44336;
+      color: white;
+    }
+    #stopBtn:hover {
+      background-color: #da190b;
+    }
+
+    /* Disabled state */
+    button:disabled {
+      background-color: #cccccc !important;
+      color: #666666 !important;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+  </style>
+</head>
+<body>
+  <h1>Screen Mint</h1>
+  <button id="startBtn">Start Recording</button>
+  <button id="stopBtn" disabled>Stop Recording</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>
