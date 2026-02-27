@@ -23,8 +23,10 @@ async function startRecording() {
         // Chrome shows its built-in screen/window/tab picker automatically.
         // No need for chrome.desktopCapture or chromeMediaSource constraints.
         const stream = await navigator.mediaDevices.getDisplayMedia({
-            video: true,
-            audio: false
+            video: {
+                displaySurface: 'monitor' // prefer full screen, user can still pick window/tab
+            },
+            audio: true // request system audio (works on Windows/ChromeOS, not macOS)
         });
 
         console.log('Got display media stream, tracks:', stream.getTracks().map(t => t.kind));
