@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="/private/var/www/html/chrome-extension/turbotext-wa"
+PROJECT_ROOT="/private/var/www/html/chrome-extension/screen-mint"
 cd "$PROJECT_ROOT"
 
 TS="$(date +"%Y%m%d-%H%M%S")"
