@@ -57,6 +57,29 @@
     let removedFlags = [];      // removedFlags[i] = true if segment i is removed
     let selectedSegIdx = null;  // index of currently selected segment, or null
     let isDraggingPlayhead = false; // true when user is dragging the playhead
+    let undoStack = [];         // undo history [{splitPoints, removedFlags}]
+
+    function saveUndoState() {
+        undoStack.push({
+            splitPoints: [...splitPoints],
+            removedFlags: [...removedFlags]
+        });
+        if (undoStack.length > 20) undoStack.shift(); // limit
+    }
+
+    function undo() {
+        if (undoStack.length === 0) {
+            showToast('⚠️', 'Nothing to undo');
+            return;
+        }
+        const state = undoStack.pop();
+        splitPoints = state.splitPoints;
+        removedFlags = state.removedFlags;
+        selectedSegIdx = null;
+        renderTimeline();
+        updateControls();
+        showToast('↩️', 'Undone');
+    }
 
     // ── Init ──────────────────────────────────────────────────────
     init();
@@ -373,6 +396,8 @@
         // Get current removed state for this segment
         const wasRemoved = removedFlags[segIdx] || false;
 
+        saveUndoState();
+
         // Insert split point in sorted order
         splitPoints.push(time);
         splitPoints.sort((a, b) => a - b);
@@ -392,6 +417,7 @@
     // ── Remove selected segment ───────────────────────────────────
     removeSectionBtn.addEventListener('click', () => {
         if (selectedSegIdx === null) return;
+        saveUndoState();
         removedFlags[selectedSegIdx] = true;
 
         const seg = getSegments()[selectedSegIdx];
@@ -405,6 +431,7 @@
     // ── Restore selected segment ──────────────────────────────────
     restoreSectionBtn.addEventListener('click', () => {
         if (selectedSegIdx === null) return;
+        saveUndoState();
         removedFlags[selectedSegIdx] = false;
 
         const seg = getSegments()[selectedSegIdx];
@@ -424,12 +451,14 @@
 
     // ── Reset All ─────────────────────────────────────────────────
     resetAllBtn.addEventListener('click', () => {
+        if (!confirm('Reset all splits and removed sections? You can still undo with Ctrl+Z.')) return;
+        saveUndoState();
         splitPoints = [];
         removedFlags = [false];
         selectedSegIdx = null;
         renderTimeline();
         updateControls();
-        showToast('🔄', 'All changes cleared');
+        showToast('🔄', 'All changes cleared — press Ctrl+Z to undo');
     });
 
     // ── Select a segment ──────────────────────────────────────────
@@ -804,6 +833,13 @@
     // ── Keyboard Shortcuts ────────────────────────────────────────
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT') return;
+
+        // Undo with Ctrl+Z / Cmd+Z
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+            e.preventDefault();
+            undo();
+            return;
+        }
 
         switch (e.key) {
             case ' ':
