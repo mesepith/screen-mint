@@ -82,6 +82,13 @@ chrome.runtime.onMessage.addListener((message) => {
         console.log('Recording stopped confirmation from offscreen');
         isRecording = false;
 
+        // Open the editor page if the recording data is ready
+        if (message.openEditor) {
+            chrome.tabs.create({
+                url: chrome.runtime.getURL('editor.html')
+            });
+        }
+
         chrome.runtime.sendMessage({ action: 'recordingStopped' }).catch(() => { });
     }
 

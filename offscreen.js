@@ -51,40 +51,50 @@ async function startRecording() {
             }
         };
 
-        mediaRecorder.onstop = () => {
+        mediaRecorder.onstop = async () => {
             // Create a Blob from the recorded chunks
             const blob = new Blob(recordedChunks, { type: options.mimeType });
-
-            // Create an object URL from the Blob
-            const url = URL.createObjectURL(blob);
-
-            // Trigger download
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
 
             // Format current timestamp for filename
             const now = new Date();
             const filename = `Screen_Recording_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}.webm`;
 
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
+            try {
+                // Store the blob in IndexedDB (available in offscreen documents,
+                // shared across all extension pages via same origin)
+                await saveToIndexedDB(blob, options.mimeType, filename);
 
-            // Cleanup
-            setTimeout(() => {
-                document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-            }, 100);
+                // Stop all tracks in the stream
+                stream.getTracks().forEach(track => track.stop());
 
-            // Stop all tracks in the stream
-            stream.getTracks().forEach(track => track.stop());
+                // Notify background that recording has stopped and data is ready
+                chrome.runtime.sendMessage({
+                    type: 'recording-stopped-from-offscreen',
+                    target: 'background',
+                    openEditor: true
+                });
+            } catch (err) {
+                console.error('Error storing recording:', err);
+                // Fallback: direct download if storage fails
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
 
-            // Notify background that recording has stopped
-            chrome.runtime.sendMessage({
-                type: 'recording-stopped-from-offscreen',
-                target: 'background'
-            });
+                stream.getTracks().forEach(track => track.stop());
+
+                chrome.runtime.sendMessage({
+                    type: 'recording-stopped-from-offscreen',
+                    target: 'background'
+                });
+            }
         };
 
         // If user stops sharing via Chrome's built-in "Stop sharing" button,
@@ -141,4 +151,49 @@ function stopRecording() {
             target: 'background'
         });
     }
+}
+
+// ── IndexedDB Helper ─────────────────────────────────────────────
+// Stores the recording blob in IndexedDB so the editor page can access it.
+// IndexedDB is a web API available in offscreen documents and shared across
+// all extension pages (same origin: chrome-extension://<id>).
+function saveToIndexedDB(blob, mimeType, fileName) {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open('ScreenMintDB', 1);
+
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains('recordings')) {
+                db.createObjectStore('recordings', { keyPath: 'id' });
+            }
+        };
+
+        request.onsuccess = (event) => {
+            const db = event.target.result;
+            const tx = db.transaction('recordings', 'readwrite');
+            const store = tx.objectStore('recordings');
+
+            store.put({
+                id: 'latest',
+                blob: blob,
+                mimeType: mimeType,
+                fileName: fileName,
+                timestamp: Date.now()
+            });
+
+            tx.oncomplete = () => {
+                db.close();
+                resolve();
+            };
+
+            tx.onerror = () => {
+                db.close();
+                reject(new Error('IndexedDB transaction failed'));
+            };
+        };
+
+        request.onerror = () => {
+            reject(new Error('Failed to open IndexedDB'));
+        };
+    });
 }

@@ -5,7 +5,8 @@
   "description": "A Chrome extension to capture and record your screen.",
   "permissions": [
     "desktopCapture",
-    "offscreen"
+    "offscreen",
+    "tabs"
   ],
   "background": {
     "service_worker": "background.js"
