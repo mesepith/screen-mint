@@ -56,6 +56,7 @@
     let splitPoints = [];       // sorted array of split times
     let removedFlags = [];      // removedFlags[i] = true if segment i is removed
     let selectedSegIdx = null;  // index of currently selected segment, or null
+    let isDraggingPlayhead = false; // true when user is dragging the playhead
 
     // ── Init ──────────────────────────────────────────────────────
     init();
@@ -188,6 +189,61 @@
         const rect = progressContainer.getBoundingClientRect();
         const pct = (e.clientX - rect.left) / rect.width;
         videoPlayer.currentTime = snapToKept(pct * videoDuration);
+    });
+
+    // ── Playhead Drag (scrub on timeline) ─────────────────────────
+    function getTimeFromPointer(e) {
+        const rect = timeline.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        return pct * videoDuration;
+    }
+
+    timelinePlayhead.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isDraggingPlayhead = true;
+        videoPlayer.pause();
+        document.body.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+    });
+
+    timelinePlayhead.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+        isDraggingPlayhead = true;
+        videoPlayer.pause();
+    }, { passive: true });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDraggingPlayhead) return;
+        const time = getTimeFromPointer(e);
+        videoPlayer.currentTime = time;
+        const pct = (time / videoDuration) * 100;
+        timelinePlayhead.style.left = pct + '%';
+        progressFilled.style.width = pct + '%';
+        updateTimeDisplay();
+    });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!isDraggingPlayhead) return;
+        const time = getTimeFromPointer(e);
+        videoPlayer.currentTime = time;
+        const pct = (time / videoDuration) * 100;
+        timelinePlayhead.style.left = pct + '%';
+        progressFilled.style.width = pct + '%';
+        updateTimeDisplay();
+    }, { passive: true });
+
+    document.addEventListener('mouseup', () => {
+        if (!isDraggingPlayhead) return;
+        isDraggingPlayhead = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+
+    document.addEventListener('touchend', () => {
+        if (!isDraggingPlayhead) return;
+        isDraggingPlayhead = false;
     });
 
     // ── Volume ────────────────────────────────────────────────────
@@ -421,8 +477,9 @@
             tooltip.textContent = `${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
             el.appendChild(tooltip);
 
-            // Click to select this segment
+            // Click to select this segment (but not during playhead drag)
             el.addEventListener('click', (e) => {
+                if (isDraggingPlayhead) return;
                 e.stopPropagation();
                 selectSegment(idx);
             });
