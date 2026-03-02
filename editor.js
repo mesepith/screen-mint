@@ -126,6 +126,10 @@
 
     function togglePlay() {
         if (videoPlayer.paused || videoPlayer.ended) {
+            // If current time is outside the trim range, jump to trimStart
+            if (videoPlayer.currentTime < trimStart || videoPlayer.currentTime >= trimEnd - 0.05) {
+                videoPlayer.currentTime = trimStart;
+            }
             videoPlayer.play();
         } else {
             videoPlayer.pause();
@@ -152,7 +156,7 @@
 
     stopBtn.addEventListener('click', () => {
         videoPlayer.pause();
-        videoPlayer.currentTime = 0;
+        videoPlayer.currentTime = trimStart;
     });
 
     // ── Progress Bar ───────────────────────────────────────────────
@@ -163,6 +167,12 @@
 
             // Update trim playhead
             trimPlayhead.style.left = pct + '%';
+
+            // Enforce trim boundary: pause when reaching trimEnd
+            if (!videoPlayer.paused && videoPlayer.currentTime >= trimEnd - 0.05) {
+                videoPlayer.pause();
+                videoPlayer.currentTime = trimEnd;
+            }
         }
         updateTimeDisplay();
     });
