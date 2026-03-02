@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════
    Screen Mint — Video Editor Logic
-   Handles: playback, trim, download original/trimmed, waveform
+   Split & delete model: split timeline, click any part to remove
    ═══════════════════════════════════════════════════════════════ */
 
 (() => {
@@ -23,22 +23,25 @@
     const volumeSlider = document.getElementById('volumeSlider');
     const recordingInfo = document.getElementById('recordingInfo');
 
-    // Trim elements
-    const trimTimeline = document.getElementById('trimTimeline');
-    const trimWaveform = document.getElementById('trimWaveform');
-    const trimRegion = document.getElementById('trimRegion');
-    const trimHandleLeft = document.getElementById('trimHandleLeft');
-    const trimHandleRight = document.getElementById('trimHandleRight');
-    const trimPlayhead = document.getElementById('trimPlayhead');
-    const trimStartInput = document.getElementById('trimStartInput');
-    const trimEndInput = document.getElementById('trimEndInput');
-    const trimDurationValue = document.getElementById('trimDurationValue');
-    const trimResetBtn = document.getElementById('trimResetBtn');
-    const trimInfo = document.getElementById('trimInfo');
+    // Timeline
+    const timeline = document.getElementById('timeline');
+    const timelineWaveform = document.getElementById('timelineWaveform');
+    const timelineSegmentsLayer = document.getElementById('timelineSegmentsLayer');
+    const timelineSplitsLayer = document.getElementById('timelineSplitsLayer');
+    const timelinePlayhead = document.getElementById('timelinePlayhead');
+    const timelineLabelStart = document.getElementById('timelineLabelStart');
+    const timelineLabelEnd = document.getElementById('timelineLabelEnd');
 
-    // Action buttons
-    const downloadOriginalBtn = document.getElementById('downloadOriginalBtn');
-    const downloadTrimmedBtn = document.getElementById('downloadTrimmedBtn');
+    // Controls
+    const splitBtn = document.getElementById('splitBtn');
+    const removeSectionBtn = document.getElementById('removeSectionBtn');
+    const restoreSectionBtn = document.getElementById('restoreSectionBtn');
+    const deselectBtn = document.getElementById('deselectBtn');
+    const resetAllBtn = document.getElementById('resetAllBtn');
+    const editorInfo = document.getElementById('editorInfo');
+
+    // Actions
+    const downloadBtn = document.getElementById('downloadBtn');
     const discardBtn = document.getElementById('discardBtn');
 
     const processingOverlay = document.getElementById('processingOverlay');
@@ -47,19 +50,19 @@
     // ── State ──────────────────────────────────────────────────────
     let videoBlob = null;
     let videoDuration = 0;
-    let trimStart = 0;
-    let trimEnd = 0;
-    let isDragging = null; // 'left' | 'right' | null
     let videoFileName = '';
 
-    // ── Init: Load video from IndexedDB ─────────────────────────────
+    // Split & delete state
+    let splitPoints = [];       // sorted array of split times
+    let removedFlags = [];      // removedFlags[i] = true if segment i is removed
+    let selectedSegIdx = null;  // index of currently selected segment, or null
+
+    // ── Init ──────────────────────────────────────────────────────
     init();
 
     async function init() {
         try {
-            // Retrieve the recording data from IndexedDB
             const result = await loadFromIndexedDB();
-
             if (!result) {
                 showToast('⚠️', 'No recording found. Please record a video first.');
                 loadingScreen.classList.add('hidden');
@@ -69,14 +72,11 @@
             videoFileName = result.fileName || generateFileName();
             videoBlob = result.blob;
 
-            // Create object URL for playback
             const objectUrl = URL.createObjectURL(videoBlob);
             videoPlayer.src = objectUrl;
 
             videoPlayer.addEventListener('loadedmetadata', () => {
-                // Handle Infinity duration (common with webm)
                 if (!isFinite(videoPlayer.duration)) {
-                    // Seek to a very large value to force duration calculation
                     videoPlayer.currentTime = 1e10;
                     videoPlayer.addEventListener('seeked', function onSeek() {
                         videoPlayer.removeEventListener('seeked', onSeek);
@@ -102,34 +102,26 @@
 
     function finishInit() {
         videoDuration = videoPlayer.duration;
-        if (!isFinite(videoDuration) || videoDuration <= 0) {
-            videoDuration = 0;
-        }
-        trimStart = 0;
-        trimEnd = videoDuration;
+        if (!isFinite(videoDuration) || videoDuration <= 0) videoDuration = 0;
+
+        removedFlags = [false]; // one segment initially (the whole video)
 
         updateTimeDisplay();
-        updateTrimUI();
         drawWaveform();
+        updateTimelineLabels();
+        renderTimeline();
 
         recordingInfo.textContent = formatDuration(videoDuration) + ' recorded';
-
-        // Hide loading
         loadingScreen.classList.add('hidden');
-
         showToast('✅', 'Recording loaded successfully!');
     }
 
-    // ── Playback Controls ─────────────────────────────────────────
+    // ── Playback ──────────────────────────────────────────────────
     playOverlay.addEventListener('click', togglePlay);
     playPauseBtn.addEventListener('click', togglePlay);
 
     function togglePlay() {
         if (videoPlayer.paused || videoPlayer.ended) {
-            // If current time is outside the trim range, jump to trimStart
-            if (videoPlayer.currentTime < trimStart || videoPlayer.currentTime >= trimEnd - 0.05) {
-                videoPlayer.currentTime = trimStart;
-            }
             videoPlayer.play();
         } else {
             videoPlayer.pause();
@@ -156,34 +148,49 @@
 
     stopBtn.addEventListener('click', () => {
         videoPlayer.pause();
-        videoPlayer.currentTime = trimStart;
+        videoPlayer.currentTime = 0;
     });
 
-    // ── Progress Bar ───────────────────────────────────────────────
+    // ── Progress & Playhead ───────────────────────────────────────
     videoPlayer.addEventListener('timeupdate', () => {
         if (videoDuration > 0) {
-            const pct = (videoPlayer.currentTime / videoDuration) * 100;
+            const ct = videoPlayer.currentTime;
+            const pct = (ct / videoDuration) * 100;
             progressFilled.style.width = pct + '%';
+            timelinePlayhead.style.left = pct + '%';
 
-            // Update trim playhead
-            trimPlayhead.style.left = pct + '%';
-
-            // Enforce trim boundary: pause when reaching trimEnd
-            if (!videoPlayer.paused && videoPlayer.currentTime >= trimEnd - 0.05) {
-                videoPlayer.pause();
-                videoPlayer.currentTime = trimEnd;
+            // Skip removed segments during playback
+            if (!videoPlayer.paused) {
+                const segments = getSegments();
+                for (const seg of segments) {
+                    if (seg.removed && ct >= seg.start && ct < seg.end - 0.05) {
+                        videoPlayer.currentTime = seg.end;
+                        return;
+                    }
+                }
             }
         }
         updateTimeDisplay();
     });
 
+    // Snap seek to skip removed segments
+    function snapToKept(time) {
+        const segments = getSegments();
+        for (const seg of segments) {
+            if (seg.removed && time >= seg.start && time < seg.end) {
+                return seg.end;
+            }
+        }
+        return time;
+    }
+
     progressContainer.addEventListener('click', (e) => {
         const rect = progressContainer.getBoundingClientRect();
         const pct = (e.clientX - rect.left) / rect.width;
-        videoPlayer.currentTime = pct * videoDuration;
+        videoPlayer.currentTime = snapToKept(pct * videoDuration);
     });
 
-    // ── Volume ─────────────────────────────────────────────────────
+    // ── Volume ────────────────────────────────────────────────────
     muteBtn.addEventListener('click', () => {
         videoPlayer.muted = !videoPlayer.muted;
         volumeOnIcon.style.display = videoPlayer.muted ? 'none' : 'block';
@@ -203,127 +210,11 @@
         }
     });
 
-    // ── Trim Handles ───────────────────────────────────────────────
-    trimHandleLeft.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        isDragging = 'left';
-        document.addEventListener('mousemove', onTrimDrag);
-        document.addEventListener('mouseup', onTrimDragEnd);
-    });
-
-    trimHandleRight.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        isDragging = 'right';
-        document.addEventListener('mousemove', onTrimDrag);
-        document.addEventListener('mouseup', onTrimDragEnd);
-    });
-
-    // Touch support
-    trimHandleLeft.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        isDragging = 'left';
-        document.addEventListener('touchmove', onTrimDragTouch);
-        document.addEventListener('touchend', onTrimDragEndTouch);
-    });
-
-    trimHandleRight.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        isDragging = 'right';
-        document.addEventListener('touchmove', onTrimDragTouch);
-        document.addEventListener('touchend', onTrimDragEndTouch);
-    });
-
-    function onTrimDrag(e) {
-        if (!isDragging) return;
-        const rect = trimTimeline.getBoundingClientRect();
-        let pct = (e.clientX - rect.left) / rect.width;
-        pct = Math.max(0, Math.min(1, pct));
-        applyTrimDrag(pct);
-    }
-
-    function onTrimDragTouch(e) {
-        if (!isDragging || !e.touches[0]) return;
-        const rect = trimTimeline.getBoundingClientRect();
-        let pct = (e.touches[0].clientX - rect.left) / rect.width;
-        pct = Math.max(0, Math.min(1, pct));
-        applyTrimDrag(pct);
-    }
-
-    function applyTrimDrag(pct) {
-        const time = pct * videoDuration;
-        const minDuration = 0.5; // Minimum 0.5s trim
-
-        if (isDragging === 'left') {
-            trimStart = Math.min(time, trimEnd - minDuration);
-            trimStart = Math.max(0, trimStart);
-        } else if (isDragging === 'right') {
-            trimEnd = Math.max(time, trimStart + minDuration);
-            trimEnd = Math.min(videoDuration, trimEnd);
-        }
-
-        updateTrimUI();
-    }
-
-    function onTrimDragEnd() {
-        isDragging = null;
-        document.removeEventListener('mousemove', onTrimDrag);
-        document.removeEventListener('mouseup', onTrimDragEnd);
-    }
-
-    function onTrimDragEndTouch() {
-        isDragging = null;
-        document.removeEventListener('touchmove', onTrimDragTouch);
-        document.removeEventListener('touchend', onTrimDragEndTouch);
-    }
-
-    // Click on timeline to seek
-    trimTimeline.addEventListener('click', (e) => {
-        if (isDragging) return;
-        const rect = trimTimeline.getBoundingClientRect();
-        const pct = (e.clientX - rect.left) / rect.width;
-        videoPlayer.currentTime = pct * videoDuration;
-    });
-
-    // Reset trim
-    trimResetBtn.addEventListener('click', () => {
-        trimStart = 0;
-        trimEnd = videoDuration;
-        updateTrimUI();
-        showToast('🔄', 'Trim range reset');
-    });
-
-    function updateTrimUI() {
-        if (videoDuration <= 0) return;
-
-        const leftPct = (trimStart / videoDuration) * 100;
-        const rightPct = (trimEnd / videoDuration) * 100;
-        const widthPct = rightPct - leftPct;
-
-        trimRegion.style.left = leftPct + '%';
-        trimRegion.style.width = widthPct + '%';
-
-        trimStartInput.value = formatTimePrecise(trimStart);
-        trimEndInput.value = formatTimePrecise(trimEnd);
-
-        const trimDur = trimEnd - trimStart;
-        trimDurationValue.textContent = formatDuration(trimDur);
-
-        // Show/hide trimmed download based on whether trim differs from full
-        const isTrimmed = trimStart > 0.1 || (videoDuration - trimEnd) > 0.1;
-        downloadTrimmedBtn.disabled = !isTrimmed;
-
-        if (isTrimmed) {
-            trimInfo.textContent = `Trimming ${formatDuration(trimDur)} of ${formatDuration(videoDuration)}`;
-        } else {
-            trimInfo.textContent = 'Drag handles to set trim range';
-        }
-    }
-
-    // ── Waveform Drawing ──────────────────────────────────────────
+    // ── Waveform ──────────────────────────────────────────────────
     function drawWaveform() {
-        const canvas = trimWaveform;
+        const canvas = timelineWaveform;
         const ctx = canvas.getContext('2d');
-        const rect = trimTimeline.getBoundingClientRect();
+        const rect = timeline.getBoundingClientRect();
 
         canvas.width = rect.width * window.devicePixelRatio;
         canvas.height = rect.height * window.devicePixelRatio;
@@ -331,18 +222,15 @@
         canvas.style.height = rect.height + 'px';
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-        const w = rect.width;
-        const h = rect.height;
+        const w = rect.width, h = rect.height;
         const barCount = Math.floor(w / 4);
         const barWidth = 2;
         const gap = (w - barCount * barWidth) / (barCount - 1);
 
         ctx.clearRect(0, 0, w, h);
 
-        // Draw a decorative pseudo-waveform
         for (let i = 0; i < barCount; i++) {
             const x = i * (barWidth + gap);
-            // Generate a visually pleasing waveform pattern
             const noise1 = Math.sin(i * 0.15) * 0.3;
             const noise2 = Math.sin(i * 0.4 + 1.5) * 0.2;
             const noise3 = Math.cos(i * 0.08) * 0.25;
@@ -359,94 +247,331 @@
         }
     }
 
-    // Redraw on resize
     window.addEventListener('resize', () => {
-        if (videoDuration > 0) drawWaveform();
+        if (videoDuration > 0) {
+            drawWaveform();
+            renderTimeline();
+        }
     });
 
-    // ── Download Original ─────────────────────────────────────────
-    downloadOriginalBtn.addEventListener('click', () => {
+    function updateTimelineLabels() {
+        timelineLabelStart.textContent = formatTimePrecise(0);
+        timelineLabelEnd.textContent = formatTimePrecise(videoDuration);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ── SEGMENTS MODEL ───────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+
+    function getSegments() {
+        const pts = [0, ...splitPoints, videoDuration];
+        return pts.slice(0, -1).map((start, i) => ({
+            index: i,
+            start: start,
+            end: pts[i + 1],
+            removed: removedFlags[i] || false
+        }));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ── SPLIT & DELETE ACTIONS ────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+
+    // ── Split at playhead ─────────────────────────────────────────
+    splitBtn.addEventListener('click', () => {
+        addSplit(videoPlayer.currentTime);
+    });
+
+    function addSplit(time) {
+        if (videoDuration <= 0) return;
+        if (time < 0.3 || time > videoDuration - 0.3) {
+            showToast('⚠️', 'Cannot split too close to the start or end');
+            return;
+        }
+
+        // Don't split too close to existing split
+        for (const sp of splitPoints) {
+            if (Math.abs(sp - time) < 0.3) {
+                showToast('⚠️', 'A split already exists near this point');
+                return;
+            }
+        }
+
+        // Find which segment the split falls in
+        const segments = getSegments();
+        let segIdx = segments.length - 1;
+        for (let i = 0; i < segments.length; i++) {
+            if (time >= segments[i].start && time < segments[i].end) {
+                segIdx = i;
+                break;
+            }
+        }
+
+        // Don't split too close to segment boundaries
+        const seg = segments[segIdx];
+        if (time - seg.start < 0.3 || seg.end - time < 0.3) {
+            showToast('⚠️', 'Cannot split too close to an existing split');
+            return;
+        }
+
+        // Get current removed state for this segment
+        const wasRemoved = removedFlags[segIdx] || false;
+
+        // Insert split point in sorted order
+        splitPoints.push(time);
+        splitPoints.sort((a, b) => a - b);
+
+        // Split the removed flag: the segment at segIdx becomes two segments
+        // Both halves inherit the removed state
+        removedFlags.splice(segIdx, 1, wasRemoved, wasRemoved);
+
+        // Deselect
+        selectedSegIdx = null;
+
+        renderTimeline();
+        updateControls();
+        showToast('✂️', `Split at ${formatTimePrecise(time)}`);
+    }
+
+    // ── Remove selected segment ───────────────────────────────────
+    removeSectionBtn.addEventListener('click', () => {
+        if (selectedSegIdx === null) return;
+        removedFlags[selectedSegIdx] = true;
+
+        const seg = getSegments()[selectedSegIdx];
+        showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
+
+        selectedSegIdx = null;
+        renderTimeline();
+        updateControls();
+    });
+
+    // ── Restore selected segment ──────────────────────────────────
+    restoreSectionBtn.addEventListener('click', () => {
+        if (selectedSegIdx === null) return;
+        removedFlags[selectedSegIdx] = false;
+
+        const seg = getSegments()[selectedSegIdx];
+        showToast('↩️', `Restored ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
+
+        selectedSegIdx = null;
+        renderTimeline();
+        updateControls();
+    });
+
+    // ── Deselect ──────────────────────────────────────────────────
+    deselectBtn.addEventListener('click', () => {
+        selectedSegIdx = null;
+        renderTimeline();
+        updateControls();
+    });
+
+    // ── Reset All ─────────────────────────────────────────────────
+    resetAllBtn.addEventListener('click', () => {
+        splitPoints = [];
+        removedFlags = [false];
+        selectedSegIdx = null;
+        renderTimeline();
+        updateControls();
+        showToast('🔄', 'All changes cleared');
+    });
+
+    // ── Select a segment ──────────────────────────────────────────
+    function selectSegment(index) {
+        selectedSegIdx = (selectedSegIdx === index) ? null : index;
+        renderTimeline();
+        updateControls();
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ── RENDERING ────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+
+    function renderTimeline() {
+        renderSegments();
+        renderSplitMarkers();
+    }
+
+    function renderSegments() {
+        timelineSegmentsLayer.innerHTML = '';
+        const segments = getSegments();
+
+        segments.forEach((seg, idx) => {
+            const leftPct = (seg.start / videoDuration) * 100;
+            const widthPct = ((seg.end - seg.start) / videoDuration) * 100;
+
+            const el = document.createElement('div');
+            el.className = 'segment-overlay';
+            if (seg.removed) el.classList.add('removed');
+            if (idx === selectedSegIdx) el.classList.add('selected');
+            el.style.left = leftPct + '%';
+            el.style.width = widthPct + '%';
+
+            // "REMOVED" label for removed segments
+            if (seg.removed) {
+                const label = document.createElement('span');
+                label.className = 'segment-removed-label';
+                label.textContent = 'REMOVED';
+                el.appendChild(label);
+            }
+
+            // Tooltip with time range
+            const tooltip = document.createElement('span');
+            tooltip.className = 'segment-tooltip';
+            tooltip.textContent = `${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
+            el.appendChild(tooltip);
+
+            // Click to select this segment
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                selectSegment(idx);
+            });
+
+            timelineSegmentsLayer.appendChild(el);
+        });
+    }
+
+    function renderSplitMarkers() {
+        timelineSplitsLayer.innerHTML = '';
+
+        splitPoints.forEach((time) => {
+            const pct = (time / videoDuration) * 100;
+            const marker = document.createElement('div');
+            marker.className = 'split-marker';
+            marker.style.left = pct + '%';
+            timelineSplitsLayer.appendChild(marker);
+        });
+    }
+
+    // ── Update control buttons visibility ─────────────────────────
+    function updateControls() {
+        const segments = getSegments();
+        const hasAnySplit = splitPoints.length > 0;
+        const hasAnyRemoved = removedFlags.some(f => f);
+
+        // Selected segment info
+        const hasSelection = selectedSegIdx !== null;
+        const isSelectedRemoved = hasSelection && (removedFlags[selectedSegIdx] || false);
+
+        // Buttons
+        removeSectionBtn.style.display = (hasSelection && !isSelectedRemoved) ? '' : 'none';
+        restoreSectionBtn.style.display = (hasSelection && isSelectedRemoved) ? '' : 'none';
+        deselectBtn.style.display = hasSelection ? '' : 'none';
+        resetAllBtn.style.display = (hasAnySplit || hasAnyRemoved) ? '' : 'none';
+
+        // Info text
+        if (hasSelection) {
+            const seg = segments[selectedSegIdx];
+            const dur = formatDuration(seg.end - seg.start);
+            if (isSelectedRemoved) {
+                editorInfo.textContent = `Selected removed section (${dur}) — click "Restore" to bring it back`;
+            } else {
+                editorInfo.textContent = `Selected section (${dur}) — click "Remove" to cut it out`;
+            }
+        } else if (hasAnyRemoved) {
+            const totalRemoved = segments.filter(s => s.removed).reduce((sum, s) => sum + (s.end - s.start), 0);
+            const remaining = videoDuration - totalRemoved;
+            editorInfo.textContent = `${formatDuration(totalRemoved)} removed · ${formatDuration(remaining)} remaining`;
+        } else if (hasAnySplit) {
+            editorInfo.textContent = `${segments.length} sections — click any section to select it`;
+        } else {
+            editorInfo.textContent = 'Split the timeline, then click any part to remove it';
+        }
+    }
+
+    downloadBtn.addEventListener('click', async () => {
         if (!videoBlob) return;
-        downloadBlob(videoBlob, videoFileName);
-        showToast('⬇️', 'Downloading original recording…');
-    });
 
-    // ── Download Trimmed ──────────────────────────────────────────
-    downloadTrimmedBtn.addEventListener('click', async () => {
-        if (!videoBlob || downloadTrimmedBtn.disabled) return;
+        const hasAnyRemoved = removedFlags.some(f => f);
+
+        if (!hasAnyRemoved) {
+            // No cuts — download original
+            downloadBlob(videoBlob, videoFileName);
+            showToast('⬇️', 'Downloading original recording…');
+            return;
+        }
+
+        // Get kept segments
+        const keptSegments = getSegments().filter(s => !s.removed);
+
+        if (keptSegments.length === 0) {
+            showToast('⚠️', 'Nothing left to download — all sections are removed.');
+            return;
+        }
 
         processingOverlay.classList.add('active');
+        const processingSubtext = processingOverlay.querySelector('.processing-subtext');
+        processingSubtext.textContent = 'Preparing…';
 
         try {
-            const trimmedBlob = await trimVideo(videoBlob, trimStart, trimEnd);
+            const editedBlob = await encodeKeptSegments(videoBlob, keptSegments, (progress) => {
+                processingSubtext.textContent = progress;
+            });
 
-            // Generate trimmed filename
             const ext = videoFileName.split('.').pop();
             const baseName = videoFileName.replace('.' + ext, '');
-            const trimmedFileName = `${baseName}_trimmed.${ext}`;
+            const newFileName = `${baseName}_edited.${ext}`;
 
-            downloadBlob(trimmedBlob, trimmedFileName);
-            showToast('✂️', 'Trimmed video downloaded!');
+            downloadBlob(editedBlob, newFileName);
+            showToast('✅', 'Edited video downloaded!');
         } catch (err) {
-            console.error('Trim error:', err);
-            showToast('❌', 'Failed to trim video: ' + err.message);
+            console.error('Download error:', err);
+            showToast('❌', 'Failed to process video: ' + err.message);
         } finally {
             processingOverlay.classList.remove('active');
         }
     });
 
-    // ── Trim Video using MediaRecorder re-encoding ────────────────
-    function trimVideo(blob, startTime, endTime) {
+    // ── Encode all kept segments in a single MediaRecorder session ──
+    function encodeKeptSegments(blob, segments, onProgress) {
         return new Promise((resolve, reject) => {
             const url = URL.createObjectURL(blob);
             const tempVideo = document.createElement('video');
             tempVideo.muted = true;
             tempVideo.src = url;
 
+            let currentSegIndex = 0;
+            let recorder = null;
+            let chunks = [];
+            let canvas, ctx, canvasStream, recOptions;
+            let animFrameId = null;
+
             tempVideo.addEventListener('loadedmetadata', () => {
-                // Handle non-finite durations
                 if (!isFinite(tempVideo.duration)) {
                     tempVideo.currentTime = 1e10;
                     tempVideo.addEventListener('seeked', function seekOnce() {
                         tempVideo.removeEventListener('seeked', seekOnce);
-                        tempVideo.currentTime = startTime;
-                        tempVideo.addEventListener('seeked', startCapture, { once: true });
+                        setupRecorder();
                     }, { once: true });
                 } else {
-                    tempVideo.currentTime = startTime;
-                    tempVideo.addEventListener('seeked', startCapture, { once: true });
+                    setupRecorder();
                 }
             });
 
             tempVideo.addEventListener('error', () => {
                 URL.revokeObjectURL(url);
-                reject(new Error('Failed to load video for trimming'));
+                reject(new Error('Failed to load video for encoding'));
             });
 
-            function startCapture() {
-                // Use canvas + MediaRecorder to re-encode the trimmed segment
-                const canvas = document.createElement('canvas');
+            function setupRecorder() {
+                // Create canvas for the whole session
+                canvas = document.createElement('canvas');
                 canvas.width = tempVideo.videoWidth || 1920;
                 canvas.height = tempVideo.videoHeight || 1080;
-                const ctx = canvas.getContext('2d');
+                ctx = canvas.getContext('2d');
+                canvasStream = canvas.captureStream(30);
 
-                const canvasStream = canvas.captureStream(30);
-
-                // Try to capture audio too
+                // Try to capture audio
                 try {
                     const audioCtx = new AudioContext();
                     const source = audioCtx.createMediaElementSource(tempVideo);
                     const dest = audioCtx.createMediaStreamDestination();
                     source.connect(dest);
                     source.connect(audioCtx.destination);
-                    dest.stream.getAudioTracks().forEach(track => {
-                        canvasStream.addTrack(track);
-                    });
-                } catch (_e) {
-                    // No audio — that's okay
-                }
+                    dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+                } catch (_e) { /* no audio */ }
 
-                let recOptions;
+                // Choose codec
                 if (MediaRecorder.isTypeSupported('video/webm; codecs=vp9')) {
                     recOptions = { mimeType: 'video/webm; codecs=vp9' };
                 } else if (MediaRecorder.isTypeSupported('video/webm; codecs=vp8')) {
@@ -455,68 +580,119 @@
                     recOptions = { mimeType: 'video/webm' };
                 }
 
-                const recorder = new MediaRecorder(canvasStream, recOptions);
-                const chunks = [];
+                // Create ONE recorder for the entire output
+                recorder = new MediaRecorder(canvasStream, recOptions);
+                chunks = [];
 
                 recorder.ondataavailable = (e) => {
                     if (e.data && e.data.size > 0) chunks.push(e.data);
                 };
 
                 recorder.onstop = () => {
+                    if (animFrameId) cancelAnimationFrame(animFrameId);
                     URL.revokeObjectURL(url);
-                    const trimmedBlob = new Blob(chunks, { type: recOptions.mimeType });
-                    resolve(trimmedBlob);
+                    const finalBlob = new Blob(chunks, { type: recOptions.mimeType });
+                    resolve(finalBlob);
                 };
 
-                recorder.onerror = (event) => {
+                recorder.onerror = () => {
+                    if (animFrameId) cancelAnimationFrame(animFrameId);
                     URL.revokeObjectURL(url);
-                    reject(new Error('MediaRecorder error during trim'));
+                    reject(new Error('MediaRecorder error'));
                 };
 
-                // Draw frames
-                tempVideo.muted = false;
-                tempVideo.volume = 1;
+                // Start the single recording session
                 recorder.start(100);
-                tempVideo.play();
 
-                function drawFrame() {
-                    if (tempVideo.paused || tempVideo.ended || tempVideo.currentTime >= endTime) {
-                        tempVideo.pause();
-                        recorder.stop();
-                        return;
-                    }
-                    ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
-                    requestAnimationFrame(drawFrame);
+                // Begin with first segment
+                currentSegIndex = 0;
+                seekToSegment(currentSegIndex);
+            }
+
+            let finished = false;
+            let seeking = false;
+
+            function finishRecording() {
+                if (finished) return;
+                finished = true;
+                tempVideo.pause();
+                if (animFrameId) cancelAnimationFrame(animFrameId);
+                if (recorder && recorder.state === 'recording') {
+                    recorder.stop();
+                }
+            }
+
+            function seekToSegment(idx) {
+                if (finished) return;
+                if (idx >= segments.length) {
+                    finishRecording();
+                    return;
                 }
 
-                requestAnimationFrame(drawFrame);
+                seeking = true;
+                onProgress(`Encoding segment ${idx + 1} of ${segments.length}…`);
+                tempVideo.currentTime = segments[idx].start;
 
-                // Stop when we reach the end time
-                tempVideo.addEventListener('timeupdate', () => {
-                    if (tempVideo.currentTime >= endTime) {
-                        tempVideo.pause();
-                        if (recorder.state === 'recording') {
-                            recorder.stop();
-                        }
-                    }
-                });
+                tempVideo.addEventListener('seeked', function onSeeked() {
+                    tempVideo.removeEventListener('seeked', onSeeked);
+                    if (finished) return;
+                    seeking = false;
+                    tempVideo.muted = false;
+                    tempVideo.volume = 1;
+                    tempVideo.play();
+                    drawFrame();
+                }, { once: true });
             }
+
+            // Single function to advance — prevents double-increment
+            function advanceToNextSegment() {
+                if (finished || seeking) return;
+                tempVideo.pause();
+                currentSegIndex++;
+                if (currentSegIndex >= segments.length) {
+                    finishRecording();
+                } else {
+                    seekToSegment(currentSegIndex);
+                }
+            }
+
+            function drawFrame() {
+                if (finished || seeking || currentSegIndex >= segments.length) return;
+
+                const seg = segments[currentSegIndex];
+                if (!seg) { finishRecording(); return; }
+
+                if (tempVideo.paused || tempVideo.ended || tempVideo.currentTime >= seg.end - 0.03) {
+                    advanceToNextSegment();
+                    return;
+                }
+
+                ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+                animFrameId = requestAnimationFrame(drawFrame);
+            }
+
+            // Safety net for segment boundary
+            tempVideo.addEventListener('timeupdate', () => {
+                if (finished || seeking || currentSegIndex >= segments.length) return;
+                const seg = segments[currentSegIndex];
+                if (!seg) return;
+                if (tempVideo.currentTime >= seg.end) {
+                    advanceToNextSegment();
+                }
+            });
         });
     }
 
     // ── Discard ────────────────────────────────────────────────────
     discardBtn.addEventListener('click', async () => {
         if (confirm('Are you sure you want to discard this recording? This cannot be undone.')) {
-            // Clean up IndexedDB
-            try {
-                await deleteFromIndexedDB();
-            } catch (_e) { /* ignore */ }
+            try { await deleteFromIndexedDB(); } catch (_e) { }
             showToast('🗑️', 'Recording discarded.');
             setTimeout(() => window.close(), 1200);
         }
     });
 
-    // ── Utility Functions ─────────────────────────────────────────
+    // ── Utilities ─────────────────────────────────────────────────
     function formatTime(seconds) {
         if (!isFinite(seconds) || seconds < 0) seconds = 0;
         const m = Math.floor(seconds / 60);
@@ -548,15 +724,10 @@
     function downloadBlob(blob, filename) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.style.display = 'none';
+        a.href = url; a.download = filename; a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
-        setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }, 200);
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
     }
 
     function generateFileName() {
@@ -585,11 +756,11 @@
                 break;
             case 'ArrowLeft':
                 e.preventDefault();
-                videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 5);
+                videoPlayer.currentTime = snapToKept(Math.max(0, videoPlayer.currentTime - 5));
                 break;
             case 'ArrowRight':
                 e.preventDefault();
-                videoPlayer.currentTime = Math.min(videoDuration, videoPlayer.currentTime + 5);
+                videoPlayer.currentTime = snapToKept(Math.min(videoDuration, videoPlayer.currentTime + 5));
                 break;
             case 'm':
                 videoPlayer.muted = !videoPlayer.muted;
@@ -603,68 +774,60 @@
                     videoPlayer.requestFullscreen();
                 }
                 break;
+            case 's':
+                // Split at playhead
+                addSplit(videoPlayer.currentTime);
+                break;
+            case 'Delete':
+            case 'Backspace':
+                // Remove selected segment
+                if (selectedSegIdx !== null && !removedFlags[selectedSegIdx]) {
+                    removeSectionBtn.click();
+                }
+                break;
+            case 'Escape':
+                // Deselect
+                if (selectedSegIdx !== null) {
+                    deselectBtn.click();
+                }
+                break;
         }
     });
 
-    // ── IndexedDB Helpers ─────────────────────────────────────────────
+    // ── IndexedDB ─────────────────────────────────────────────────
     function loadFromIndexedDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open('ScreenMintDB', 1);
-
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
                 if (!db.objectStoreNames.contains('recordings')) {
                     db.createObjectStore('recordings', { keyPath: 'id' });
                 }
             };
-
             request.onsuccess = (event) => {
                 const db = event.target.result;
                 const tx = db.transaction('recordings', 'readonly');
                 const store = tx.objectStore('recordings');
                 const getReq = store.get('latest');
-
-                getReq.onsuccess = () => {
-                    db.close();
-                    resolve(getReq.result || null);
-                };
-
-                getReq.onerror = () => {
-                    db.close();
-                    reject(new Error('Failed to read from IndexedDB'));
-                };
+                getReq.onsuccess = () => { db.close(); resolve(getReq.result || null); };
+                getReq.onerror = () => { db.close(); reject(new Error('Failed to read from IndexedDB')); };
             };
-
-            request.onerror = () => {
-                reject(new Error('Failed to open IndexedDB'));
-            };
+            request.onerror = () => reject(new Error('Failed to open IndexedDB'));
         });
     }
 
     function deleteFromIndexedDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open('ScreenMintDB', 1);
-
             request.onsuccess = (event) => {
                 const db = event.target.result;
                 const tx = db.transaction('recordings', 'readwrite');
                 const store = tx.objectStore('recordings');
                 store.delete('latest');
-
-                tx.oncomplete = () => {
-                    db.close();
-                    resolve();
-                };
-
-                tx.onerror = () => {
-                    db.close();
-                    reject(new Error('Failed to delete from IndexedDB'));
-                };
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onerror = () => { db.close(); reject(new Error('Failed to delete from IndexedDB')); };
             };
-
-            request.onerror = () => {
-                reject(new Error('Failed to open IndexedDB'));
-            };
+            request.onerror = () => reject(new Error('Failed to open IndexedDB'));
         });
     }
 

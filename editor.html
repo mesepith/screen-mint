@@ -21,7 +21,7 @@
     <div class="processing-overlay" id="processingOverlay">
         <div class="processing-content">
             <div class="processing-spinner"></div>
-            <div class="processing-text">Trimming video…</div>
+            <div class="processing-text">Processing video…</div>
             <div class="processing-subtext">This may take a moment</div>
         </div>
     </div>
@@ -39,7 +39,7 @@
                 <div class="logo-icon">🎬</div>
                 <div>
                     <h1>Screen Mint</h1>
-                    <div class="header-subtitle">Review, trim & download your recording</div>
+                    <div class="header-subtitle">Review, cut &amp; download your recording</div>
                 </div>
             </div>
             <div class="header-right">
@@ -65,7 +65,6 @@
 
             <!-- Controls -->
             <div class="controls-bar">
-                <!-- Play/Pause -->
                 <button class="ctrl-btn" id="playPauseBtn" title="Play/Pause">
                     <svg id="playIcon" viewBox="0 0 24 24">
                         <path d="M8 5v14l11-7z" />
@@ -75,17 +74,14 @@
                     </svg>
                 </button>
 
-                <!-- Stop -->
                 <button class="ctrl-btn" id="stopBtn" title="Stop">
                     <svg viewBox="0 0 24 24">
                         <path d="M6 6h12v12H6z" />
                     </svg>
                 </button>
 
-                <!-- Time -->
                 <span class="time-display" id="timeDisplay">0:00 / 0:00</span>
 
-                <!-- Progress bar -->
                 <div class="progress-bar-container" id="progressContainer">
                     <div class="progress-track">
                         <div class="progress-filled" id="progressFilled">
@@ -94,7 +90,6 @@
                     </div>
                 </div>
 
-                <!-- Volume -->
                 <div class="volume-control">
                     <button class="ctrl-btn" id="muteBtn" title="Mute/Unmute">
                         <svg id="volumeOnIcon" viewBox="0 0 24 24">
@@ -111,61 +106,75 @@
             </div>
         </div>
 
-        <!-- Trim Section -->
-        <div class="trim-section">
-            <div class="trim-header">
-                <div class="trim-title">
+        <!-- Editor Section -->
+        <div class="editor-section" id="editorSection">
+            <div class="editor-header">
+                <div class="editor-title">
                     <svg viewBox="0 0 24 24">
                         <path
                             d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3h-3z" />
                     </svg>
-                    Trim Video
+                    Edit &amp; Cut
                 </div>
-                <span class="trim-info" id="trimInfo">Drag handles to set trim range</span>
+                <span class="editor-info" id="editorInfo">Split the timeline, then click any part to remove it</span>
             </div>
 
-            <!-- Timeline with handles -->
-            <div class="trim-timeline" id="trimTimeline">
-                <canvas class="trim-waveform" id="trimWaveform"></canvas>
-                <div class="trim-region" id="trimRegion">
-                    <div class="trim-handle trim-handle-left" id="trimHandleLeft"></div>
-                    <div class="trim-handle trim-handle-right" id="trimHandleRight"></div>
-                </div>
-                <div class="trim-playhead" id="trimPlayhead"></div>
+            <!-- Unified Timeline -->
+            <div class="timeline" id="timeline">
+                <canvas class="timeline-waveform" id="timelineWaveform"></canvas>
+                <div class="timeline-segments-layer" id="timelineSegmentsLayer"></div>
+                <div class="timeline-splits-layer" id="timelineSplitsLayer"></div>
+                <div class="timeline-playhead" id="timelinePlayhead"></div>
             </div>
 
-            <!-- Trim time inputs & reset -->
-            <div class="trim-controls">
-                <div class="trim-input-group">
-                    <span class="trim-label">Start</span>
-                    <input type="text" class="trim-time-input" id="trimStartInput" value="0:00.0" readonly>
-                </div>
-                <span class="trim-separator">→</span>
-                <div class="trim-input-group">
-                    <span class="trim-label">End</span>
-                    <input type="text" class="trim-time-input" id="trimEndInput" value="0:00.0" readonly>
-                </div>
-                <div class="trim-duration-badge" id="trimDurationBadge">
-                    Duration: <strong id="trimDurationValue">0:00</strong>
-                </div>
-                <button class="trim-reset-btn" id="trimResetBtn">Reset Trim</button>
+            <!-- Time labels -->
+            <div class="timeline-labels">
+                <span class="timeline-label-time" id="timelineLabelStart">0:00.0</span>
+                <span class="timeline-label-time" id="timelineLabelEnd">0:00.0</span>
+            </div>
+
+            <!-- Editor Controls -->
+            <div class="editor-controls" id="editorControls">
+                <button class="editor-btn btn-split" id="splitBtn"
+                    title="Split the timeline at the current playhead position (S)">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M11 5v6H5v2h6v6h2v-6h6v-2h-6V5h-2z" />
+                    </svg>
+                    Split Here
+                </button>
+                <button class="editor-btn btn-remove-section" id="removeSectionBtn" style="display:none"
+                    title="Remove the selected section">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                    </svg>
+                    Remove This Section
+                </button>
+                <button class="editor-btn btn-restore-section" id="restoreSectionBtn" style="display:none"
+                    title="Restore the selected section">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z" />
+                    </svg>
+                    Restore Section
+                </button>
+                <button class="editor-btn btn-cancel" id="deselectBtn" style="display:none">
+                    Deselect
+                </button>
+                <div class="editor-controls-spacer"></div>
+                <button class="editor-btn btn-undo-cuts" id="resetAllBtn" style="display:none"
+                    title="Remove all splits and restore everything">
+                    Reset All
+                </button>
             </div>
         </div>
 
         <!-- Action Buttons -->
         <div class="actions">
-            <button class="action-btn btn-download" id="downloadOriginalBtn">
+            <button class="action-btn btn-download" id="downloadBtn">
                 <svg viewBox="0 0 24 24">
                     <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
                 </svg>
-                Download Original
-            </button>
-            <button class="action-btn btn-download-trimmed" id="downloadTrimmedBtn">
-                <svg viewBox="0 0 24 24">
-                    <path
-                        d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2z" />
-                </svg>
-                Download Trimmed
+                Download
             </button>
             <div class="actions-spacer"></div>
             <button class="action-btn btn-discard" id="discardBtn">
