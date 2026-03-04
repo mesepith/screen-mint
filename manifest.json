@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Screen Mint",
-  "version": "1.0",
-  "description": "A Chrome extension to capture and record your screen.",
+  "name": "Screen Mint – Screen Recorder & Video Editor",
+  "version": "1.2",
+  "description": "Record your screen and instantly trim recordings with a built-in video editor",
   "permissions": [
     "desktopCapture",
     "offscreen",
