@@ -1492,19 +1492,20 @@
     let selectedOverlayItem = null; // {trackId, itemId}
 
     function renderInteractionBoxes(activeItems, layerW, layerH) {
-        // Don't rebuild if we're mid-drag (prevents flicker)
-        if (interactionDrag) return;
+        const isDragging = !!interactionDrag;
 
-        overlayInteractionLayer.innerHTML = '';
-
-        if (activeItems.length === 0) {
-            // Restore play overlay visibility if video is paused
-            if (videoPlayer.paused) playOverlay.classList.remove('hidden');
+        if (!isDragging) {
+            overlayInteractionLayer.innerHTML = '';
+            if (activeItems.length === 0) {
+                // Restore play overlay visibility if video is paused
+                if (videoPlayer.paused) playOverlay.classList.remove('hidden');
+                return;
+            }
+            // Hide play overlay so it doesn't obstruct the item being edited
+            playOverlay.classList.add('hidden');
+        } else if (activeItems.length === 0) {
             return;
         }
-
-        // Hide play overlay so it doesn't obstruct the item being edited
-        playOverlay.classList.add('hidden');
 
         for (const { trackId, item, measuredWidth, measuredHeight } of activeItems) {
             let itemW, itemH;
@@ -1520,63 +1521,75 @@
             const x = (item.x / 100) * layerW - itemW / 2;
             const y = (item.y / 100) * layerH - itemH / 2;
 
-            // Bounding box
-            const box = document.createElement('div');
-            box.className = 'overlay-img-box';
-            if (selectedOverlayItem && selectedOverlayItem.trackId === trackId && selectedOverlayItem.itemId === item.id) {
-                box.classList.add('active');
-            }
-            box.style.left = x + 'px';
-            box.style.top = y + 'px';
-            box.style.width = itemW + 'px';
-            box.style.height = itemH + 'px';
+            const boxId = `interaction-box-${trackId}-${item.id}`;
+            let box = document.getElementById(boxId);
 
-            // Drag to move
-            box.addEventListener('click', (e) => e.stopPropagation());
-            box.addEventListener('mousedown', (e) => {
-                // Select this item and re-render to show handles
-                if (!selectedOverlayItem || selectedOverlayItem.trackId !== trackId || selectedOverlayItem.itemId !== item.id) {
-                    selectedOverlayItem = { trackId, itemId: item.id };
-                    renderOverlayPreview(videoPlayer.currentTime);
-                }
+            if (!box && !isDragging) {
+                box = document.createElement('div');
+                box.id = boxId;
+                box.className = 'overlay-img-box';
 
-                if (e.target.classList.contains('overlay-corner-handle')) return;
-                e.preventDefault();
-                e.stopPropagation();
-                interactionDrag = {
-                    trackId, itemId: item.id, type: 'move',
-                    startX: e.clientX, startY: e.clientY,
-                    origX: item.x, origY: item.y,
-                    layerW, layerH
-                };
-                document.body.style.cursor = 'move';
-                document.body.style.userSelect = 'none';
-            });
+                // Drag to move
+                box.addEventListener('click', (e) => e.stopPropagation());
+                box.addEventListener('mousedown', (e) => {
+                    // Select this item and re-render to show handles
+                    if (!selectedOverlayItem || selectedOverlayItem.trackId !== trackId || selectedOverlayItem.itemId !== item.id) {
+                        selectedOverlayItem = { trackId, itemId: item.id };
+                        renderOverlayPreview(videoPlayer.currentTime);
+                    }
 
-            // Corner handles
-            ['tl', 'tr', 'bl', 'br'].forEach(corner => {
-                const handle = document.createElement('div');
-                handle.className = `overlay-corner-handle ${corner}`;
-                handle.addEventListener('mousedown', (e) => {
+                    if (e.target.classList.contains('overlay-corner-handle')) return;
                     e.preventDefault();
                     e.stopPropagation();
                     interactionDrag = {
-                        trackId, itemId: item.id, type: 'corner', corner,
+                        trackId, itemId: item.id, type: 'move',
                         startX: e.clientX, startY: e.clientY,
-                        origW: item.type === 'image' ? item.imageWidth : itemW,
-                        origH: item.type === 'image' ? item.imageHeight : itemH,
-                        origFontSize: item.fontSize,
                         origX: item.x, origY: item.y,
-                        layerW, layerH,
-                        aspectRatio: item.type === 'image' ? (item.imageHeight / item.imageWidth) : (itemH / itemW)
+                        layerW, layerH
                     };
-                    document.body.style.cursor = handle.style.cursor || 'nwse-resize';
+                    document.body.style.cursor = 'move';
                     document.body.style.userSelect = 'none';
                 });
-                box.appendChild(handle);
-            });
 
-            overlayInteractionLayer.appendChild(box);
+                // Corner handles
+                ['tl', 'tr', 'bl', 'br'].forEach(corner => {
+                    const handle = document.createElement('div');
+                    handle.className = `overlay-corner-handle ${corner}`;
+                    handle.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        interactionDrag = {
+                            trackId, itemId: item.id, type: 'corner', corner,
+                            startX: e.clientX, startY: e.clientY,
+                            origW: item.type === 'image' ? item.imageWidth : itemW,
+                            origH: item.type === 'image' ? item.imageHeight : itemH,
+                            origFontSize: item.fontSize,
+                            origX: item.x, origY: item.y,
+                            layerW, layerH,
+                            aspectRatio: item.type === 'image' ? (item.imageHeight / item.imageWidth) : (itemH / itemW)
+                        };
+                        document.body.style.cursor = handle.style.cursor || 'nwse-resize';
+                        document.body.style.userSelect = 'none';
+                    });
+                    box.appendChild(handle);
+                });
+
+                overlayInteractionLayer.appendChild(box);
+            }
+
+            if (box) {
+                // Update properties in real-time (even during drag)
+                box.style.left = x + 'px';
+                box.style.top = y + 'px';
+                box.style.width = itemW + 'px';
+                box.style.height = itemH + 'px';
+
+                if (selectedOverlayItem && selectedOverlayItem.trackId === trackId && selectedOverlayItem.itemId === item.id) {
+                    box.classList.add('active');
+                } else {
+                    box.classList.remove('active');
+                }
+            }
         }
     }
 
