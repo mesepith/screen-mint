@@ -1561,9 +1561,10 @@
                         interactionDrag = {
                             trackId, itemId: item.id, type: 'corner', corner,
                             startX: e.clientX, startY: e.clientY,
-                            origW: item.type === 'image' ? item.imageWidth : itemW,
-                            origH: item.type === 'image' ? item.imageHeight : itemH,
-                            origFontSize: item.fontSize,
+                            origW: itemW, // Raw pixels on screen
+                            origH: itemH, // Raw pixels on screen
+                            origImageW: item.imageWidth, // Original pct for image scaling
+                            origFontSize: item.fontSize, // Original font size for text scaling
                             origX: item.x, origY: item.y,
                             layerW, layerH,
                             aspectRatio: item.type === 'image' ? (item.imageHeight / item.imageWidth) : (itemH / itemW)
@@ -1608,23 +1609,22 @@
             item.x = Math.max(0, Math.min(100, interactionDrag.origX + dxPct));
             item.y = Math.max(0, Math.min(100, interactionDrag.origY + dyPct));
         } else {
-            // Corner resize — proportional scaling
+            // Corner resize — physical distance scaling
             const corner = interactionDrag.corner;
-            const dxPct = (dx / interactionDrag.layerW) * 100;
 
-            let scaleX = 1;
-            if (corner === 'br' || corner === 'tr') {
-                scaleX = 1 + dxPct / (interactionDrag.origW / 100); // origW might be absolute px for text
-            } else if (corner === 'bl' || corner === 'tl') {
-                scaleX = 1 - dxPct / (interactionDrag.origW / 100);
+            let newWidthPx = interactionDrag.origW;
+            if (corner === 'tr' || corner === 'br') {
+                newWidthPx += dx;
+            } else if (corner === 'tl' || corner === 'bl') {
+                newWidthPx -= dx;
             }
 
-            // Use uniform scale
-            const scale = Math.max(0.1, scaleX);
+            // Uniform scale factor
+            const scale = Math.max(0.05, newWidthPx / interactionDrag.origW);
 
             if (item.type === 'image') {
-                item.imageWidth = interactionDrag.origW * scale;
-                item.imageHeight = interactionDrag.origW * scale * interactionDrag.aspectRatio;
+                item.imageWidth = interactionDrag.origImageW * scale;
+                item.imageHeight = interactionDrag.origImageW * scale * interactionDrag.aspectRatio;
             } else if (item.type === 'text') {
                 item.fontSize = interactionDrag.origFontSize * scale;
             }
