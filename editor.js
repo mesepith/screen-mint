@@ -1400,8 +1400,8 @@
 
         overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-        // Collect active image items for interaction boxes
-        const activeImageItems = [];
+        // Collect active items for interaction boxes
+        const activeInteractiveItems = [];
 
         // Draw overlays in track order (index 0 = top priority = drawn LAST)
         // So iterate in reverse: bottom tracks first, top tracks last (on top)
@@ -1410,15 +1410,31 @@
             for (const item of track.items) {
                 if (currentTime >= item.start && currentTime < item.start + item.duration) {
                     drawSingleOverlay(overlayCtx, w, h, item);
+
                     if (item.type === 'image') {
-                        activeImageItems.push({ trackId: track.id, item });
+                        activeInteractiveItems.push({ trackId: track.id, item });
+                    } else if (item.type === 'text') {
+                        // Measure text to create bounding box
+                        const scaledFontSize = (item.fontSize / 1080) * h;
+                        overlayCtx.save();
+                        overlayCtx.font = `bold ${scaledFontSize}px Inter, Arial, sans-serif`;
+                        const metrics = overlayCtx.measureText(item.content);
+                        const textWidth = metrics.width;
+                        overlayCtx.restore();
+
+                        activeInteractiveItems.push({
+                            trackId: track.id,
+                            item,
+                            measuredWidth: textWidth,
+                            measuredHeight: scaledFontSize * 1.2 // Approx line height
+                        });
                     }
                 }
             }
         }
 
-        // Render interactive bounding boxes for active image overlays
-        renderImageInteractionBoxes(activeImageItems, w, h);
+        // Render interactive bounding boxes for active overlays
+        renderInteractionBoxes(activeInteractiveItems, w, h);
     }
 
     function drawSingleOverlay(ctx, canvasW, canvasH, item) {
@@ -1471,37 +1487,45 @@
     // Initial render
     renderOverlayTracks();
 
-    // ── Image Interaction Boxes on Preview ────────────────────────
-    let imgResizeDrag = null; // {trackId, itemId, type:'corner'|'move', corner, startX, startY, origW, origH, origX, origY, layerW, layerH}
+    // ── Interaction Boxes on Preview ──────────────────────────────
+    let interactionDrag = null; // {trackId, itemId, type:'corner'|'move', corner, startX, startY, origW, origH, origFontSize, origX, origY, layerW, layerH, aspectRatio}
 
-    function renderImageInteractionBoxes(activeImageItems, layerW, layerH) {
+    function renderInteractionBoxes(activeItems, layerW, layerH) {
         // Don't rebuild if we're mid-drag (prevents flicker)
-        if (imgResizeDrag) return;
+        if (interactionDrag) return;
 
         overlayInteractionLayer.innerHTML = '';
 
-        if (activeImageItems.length === 0) {
+        if (activeItems.length === 0) {
             // Restore play overlay visibility if video is paused
             if (videoPlayer.paused) playOverlay.classList.remove('hidden');
             return;
         }
 
-        // Hide play overlay so it doesn't obstruct the image being edited
+        // Hide play overlay so it doesn't obstruct the item being edited
         playOverlay.classList.add('hidden');
 
-        for (const { trackId, item } of activeImageItems) {
-            const imgW = (item.imageWidth / 100) * layerW;
-            const imgH = (item.imageHeight / 100) * layerH;
-            const x = (item.x / 100) * layerW - imgW / 2;
-            const y = (item.y / 100) * layerH - imgH / 2;
+        for (const { trackId, item, measuredWidth, measuredHeight } of activeItems) {
+            let itemW, itemH;
+
+            if (item.type === 'image') {
+                itemW = (item.imageWidth / 100) * layerW;
+                itemH = (item.imageHeight / 100) * layerH;
+            } else {
+                itemW = measuredWidth + 20; // Add padding
+                itemH = measuredHeight + 10;
+            }
+
+            const x = (item.x / 100) * layerW - itemW / 2;
+            const y = (item.y / 100) * layerH - itemH / 2;
 
             // Bounding box
             const box = document.createElement('div');
             box.className = 'overlay-img-box';
             box.style.left = x + 'px';
             box.style.top = y + 'px';
-            box.style.width = imgW + 'px';
-            box.style.height = imgH + 'px';
+            box.style.width = itemW + 'px';
+            box.style.height = itemH + 'px';
 
             // Drag to move
             box.addEventListener('click', (e) => e.stopPropagation());
@@ -1509,7 +1533,7 @@
                 if (e.target.classList.contains('overlay-corner-handle')) return;
                 e.preventDefault();
                 e.stopPropagation();
-                imgResizeDrag = {
+                interactionDrag = {
                     trackId, itemId: item.id, type: 'move',
                     startX: e.clientX, startY: e.clientY,
                     origX: item.x, origY: item.y,
@@ -1526,13 +1550,15 @@
                 handle.addEventListener('mousedown', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    imgResizeDrag = {
+                    interactionDrag = {
                         trackId, itemId: item.id, type: 'corner', corner,
                         startX: e.clientX, startY: e.clientY,
-                        origW: item.imageWidth, origH: item.imageHeight,
+                        origW: item.type === 'image' ? item.imageWidth : itemW,
+                        origH: item.type === 'image' ? item.imageHeight : itemH,
+                        origFontSize: item.fontSize,
                         origX: item.x, origY: item.y,
                         layerW, layerH,
-                        aspectRatio: item.imageHeight / item.imageWidth
+                        aspectRatio: item.type === 'image' ? (item.imageHeight / item.imageWidth) : (itemH / itemW)
                     };
                     document.body.style.cursor = handle.style.cursor || 'nwse-resize';
                     document.body.style.userSelect = 'none';
@@ -1545,48 +1571,58 @@
     }
 
     document.addEventListener('mousemove', (e) => {
-        if (!imgResizeDrag) return;
-        const item = getOverlayItem(imgResizeDrag.trackId, imgResizeDrag.itemId);
-        if (!item) { imgResizeDrag = null; return; }
+        if (!interactionDrag) return;
+        const item = getOverlayItem(interactionDrag.trackId, interactionDrag.itemId);
+        if (!item) { interactionDrag = null; return; }
 
-        const dx = e.clientX - imgResizeDrag.startX;
-        const dy = e.clientY - imgResizeDrag.startY;
+        const dx = e.clientX - interactionDrag.startX;
+        const dy = e.clientY - interactionDrag.startY;
 
-        if (imgResizeDrag.type === 'move') {
+        if (interactionDrag.type === 'move') {
             // Convert pixel delta to percentage
-            const dxPct = (dx / imgResizeDrag.layerW) * 100;
-            const dyPct = (dy / imgResizeDrag.layerH) * 100;
-            item.x = Math.max(0, Math.min(100, imgResizeDrag.origX + dxPct));
-            item.y = Math.max(0, Math.min(100, imgResizeDrag.origY + dyPct));
+            const dxPct = (dx / interactionDrag.layerW) * 100;
+            const dyPct = (dy / interactionDrag.layerH) * 100;
+            item.x = Math.max(0, Math.min(100, interactionDrag.origX + dxPct));
+            item.y = Math.max(0, Math.min(100, interactionDrag.origY + dyPct));
         } else {
             // Corner resize — proportional scaling
-            const corner = imgResizeDrag.corner;
-            const dxPct = (dx / imgResizeDrag.layerW) * 100;
-            const dyPct = (dy / imgResizeDrag.layerH) * 100;
+            const corner = interactionDrag.corner;
+            const dxPct = (dx / interactionDrag.layerW) * 100;
 
-            let scaleX = 1, scaleY = 1;
-            if (corner === 'br') {
-                scaleX = 1 + dxPct / imgResizeDrag.origW;
-            } else if (corner === 'bl') {
-                scaleX = 1 - dxPct / imgResizeDrag.origW;
-            } else if (corner === 'tr') {
-                scaleX = 1 + dxPct / imgResizeDrag.origW;
-            } else if (corner === 'tl') {
-                scaleX = 1 - dxPct / imgResizeDrag.origW;
+            let scaleX = 1;
+            if (corner === 'br' || corner === 'tr') {
+                scaleX = 1 + dxPct / (interactionDrag.origW / 100); // origW might be absolute px for text
+            } else if (corner === 'bl' || corner === 'tl') {
+                scaleX = 1 - dxPct / (interactionDrag.origW / 100);
             }
 
-            // Use uniform scale to maintain aspect ratio
-            const scale = Math.max(0.02, scaleX);
-            item.imageWidth = imgResizeDrag.origW * scale;
-            item.imageHeight = imgResizeDrag.origW * scale * imgResizeDrag.aspectRatio;
+            // Use uniform scale
+            const scale = Math.max(0.1, scaleX);
+
+            if (item.type === 'image') {
+                item.imageWidth = interactionDrag.origW * scale;
+                item.imageHeight = interactionDrag.origW * scale * interactionDrag.aspectRatio;
+            } else if (item.type === 'text') {
+                item.fontSize = interactionDrag.origFontSize * scale;
+            }
         }
 
         renderOverlayPreview(videoPlayer.currentTime);
     });
 
     document.addEventListener('mouseup', () => {
-        if (imgResizeDrag) {
-            imgResizeDrag = null;
+        if (interactionDrag) {
+            const item = getOverlayItem(interactionDrag.trackId, interactionDrag.itemId);
+
+            // If the text edit popover is open for this item, update its fields
+            if (item && item.type === 'text' && editingOverlay && editingOverlay.trackId === interactionDrag.trackId && editingOverlay.itemId === interactionDrag.itemId) {
+                popoverFontSize.value = Math.round(item.fontSize);
+                popoverX.value = Math.round(item.x);
+                popoverY.value = Math.round(item.y);
+            }
+
+
+            interactionDrag = null;
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             renderOverlayPreview(videoPlayer.currentTime);
