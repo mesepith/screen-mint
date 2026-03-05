@@ -1191,6 +1191,26 @@
                 });
                 el.appendChild(delBtn);
 
+                // Resize handle — left edge
+                const resizeL = document.createElement('div');
+                resizeL.className = 'overlay-resize-handle overlay-resize-handle-left';
+                resizeL.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startOverlayResize(e, track.id, item.id, lane, 'left');
+                });
+                el.appendChild(resizeL);
+
+                // Resize handle — right edge
+                const resizeR = document.createElement('div');
+                resizeR.className = 'overlay-resize-handle overlay-resize-handle-right';
+                resizeR.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startOverlayResize(e, track.id, item.id, lane, 'right');
+                });
+                el.appendChild(resizeR);
+
                 // Double-click to edit (text only)
                 if (item.type === 'text') {
                     el.addEventListener('dblclick', (e) => {
@@ -1199,16 +1219,16 @@
                     });
                 }
 
-                // Drag to reposition in time
+                // Drag to reposition in time (skip if clicking on resize handles or delete)
                 el.addEventListener('mousedown', (e) => {
-                    if (e.target.classList.contains('overlay-item-delete')) return;
+                    if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
                     e.preventDefault();
                     e.stopPropagation();
                     startOverlayDrag(e, track.id, item.id, lane);
                 });
 
                 el.addEventListener('touchstart', (e) => {
-                    if (e.target.classList.contains('overlay-item-delete')) return;
+                    if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
                     e.stopPropagation();
                     startOverlayDrag(e, track.id, item.id, lane);
                 }, { passive: false });
@@ -1273,13 +1293,95 @@
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
         }
+        if (resizingOverlayItem) {
+            resizingOverlayItem = null;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
     });
 
     document.addEventListener('touchend', () => {
         if (draggingOverlayItem) {
             draggingOverlayItem = null;
         }
+        if (resizingOverlayItem) {
+            resizingOverlayItem = null;
+        }
     });
+
+    // ── Overlay Item Resize ───────────────────────────────────────
+    let resizingOverlayItem = null; // {trackId, itemId, edge, startX, origStart, origDuration, rect}
+
+    function startOverlayResize(e, trackId, itemId, laneEl, edge) {
+        const item = getOverlayItem(trackId, itemId);
+        if (!item || videoDuration <= 0) return;
+
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const rect = laneEl.getBoundingClientRect();
+
+        resizingOverlayItem = {
+            trackId, itemId, edge,
+            startX: clientX,
+            origStart: item.start,
+            origDuration: item.duration,
+            laneWidth: rect.width
+        };
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    }
+
+    document.addEventListener('mousemove', (e) => {
+        if (!resizingOverlayItem) return;
+        const item = getOverlayItem(resizingOverlayItem.trackId, resizingOverlayItem.itemId);
+        if (!item) { resizingOverlayItem = null; return; }
+
+        const deltaX = e.clientX - resizingOverlayItem.startX;
+        const deltaTime = (deltaX / resizingOverlayItem.laneWidth) * videoDuration;
+        const minDuration = 0.2;
+
+        if (resizingOverlayItem.edge === 'right') {
+            // Dragging right edge: change duration, keep start fixed
+            let newDuration = resizingOverlayItem.origDuration + deltaTime;
+            newDuration = Math.max(minDuration, Math.min(videoDuration - item.start, newDuration));
+            item.duration = newDuration;
+        } else {
+            // Dragging left edge: change start, keep end fixed
+            const origEnd = resizingOverlayItem.origStart + resizingOverlayItem.origDuration;
+            let newStart = resizingOverlayItem.origStart + deltaTime;
+            newStart = Math.max(0, Math.min(origEnd - minDuration, newStart));
+            item.start = newStart;
+            item.duration = origEnd - newStart;
+        }
+
+        renderOverlayTracks();
+        renderOverlayPreview(videoPlayer.currentTime);
+    });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!resizingOverlayItem) return;
+        const item = getOverlayItem(resizingOverlayItem.trackId, resizingOverlayItem.itemId);
+        if (!item) { resizingOverlayItem = null; return; }
+
+        const clientX = e.touches[0].clientX;
+        const deltaX = clientX - resizingOverlayItem.startX;
+        const deltaTime = (deltaX / resizingOverlayItem.laneWidth) * videoDuration;
+        const minDuration = 0.2;
+
+        if (resizingOverlayItem.edge === 'right') {
+            let newDuration = resizingOverlayItem.origDuration + deltaTime;
+            newDuration = Math.max(minDuration, Math.min(videoDuration - item.start, newDuration));
+            item.duration = newDuration;
+        } else {
+            const origEnd = resizingOverlayItem.origStart + resizingOverlayItem.origDuration;
+            let newStart = resizingOverlayItem.origStart + deltaTime;
+            newStart = Math.max(0, Math.min(origEnd - minDuration, newStart));
+            item.start = newStart;
+            item.duration = origEnd - newStart;
+        }
+
+        renderOverlayTracks();
+        renderOverlayPreview(videoPlayer.currentTime);
+    }, { passive: true });
 
     // ── Update Lane Playheads ─────────────────────────────────────
     function updateLanePlayheads(pct) {

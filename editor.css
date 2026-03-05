@@ -1131,6 +1131,33 @@ body::before {
   opacity: 0.7;
 }
 
+/* Resize handles on overlay items */
+.overlay-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 6;
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+
+.overlay-resize-handle:hover,
+.overlay-resize-handle.active {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.overlay-resize-handle-left {
+  left: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.overlay-resize-handle-right {
+  right: 0;
+  border-radius: 0 4px 4px 0;
+}
+
 /* Delete button on item hover */
 .overlay-item-delete {
   position: absolute;
