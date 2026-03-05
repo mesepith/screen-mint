@@ -920,6 +920,405 @@ body::before {
   color: var(--text-muted);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   OVERLAY TRACKS
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Overlay Canvas on video */
+.overlay-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* Section wrapper */
+.overlay-tracks-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px 20px 24px;
+  margin-bottom: 24px;
+}
+
+.overlay-tracks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.overlay-tracks-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.overlay-tracks-title svg {
+  width: 16px;
+  height: 16px;
+  fill: var(--accent-secondary);
+}
+
+.overlay-tracks-info {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* Track container */
+.overlay-tracks-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+/* Empty state */
+.overlay-tracks-empty {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+/* Individual track row */
+.overlay-track-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  transition: border-color var(--transition-fast);
+}
+
+.overlay-track-row:hover {
+  border-color: var(--border-active);
+}
+
+/* Track sidebar (label + buttons) */
+.overlay-track-sidebar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+
+.overlay-track-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.overlay-track-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.overlay-track-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: 'Inter', sans-serif;
+  background: var(--bg-surface-hover);
+  color: var(--text-muted);
+}
+
+.overlay-track-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: var(--border-active);
+  color: var(--text-secondary);
+}
+
+.overlay-track-btn svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+}
+
+.overlay-track-btn.btn-delete-track {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.overlay-track-btn.btn-delete-track:hover {
+  color: var(--accent-danger);
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Track lane (the horizontal time strip) */
+.overlay-track-lane {
+  position: relative;
+  flex: 1;
+  height: 42px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* Overlay item block in the lane */
+.overlay-item {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  transition: box-shadow var(--transition-fast), opacity var(--transition-fast);
+  user-select: none;
+  min-width: 12px;
+}
+
+.overlay-item:active {
+  cursor: grabbing;
+}
+
+.overlay-item:hover {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+  z-index: 5;
+}
+
+/* Text overlay item */
+.overlay-item-text {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.55), rgba(139, 92, 246, 0.55));
+  border: 1px solid rgba(99, 102, 241, 0.4);
+}
+
+/* Image overlay item */
+.overlay-item-image {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.45), rgba(6, 182, 212, 0.45));
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.overlay-item-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+
+/* Delete button on item hover */
+.overlay-item-delete {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(239, 68, 68, 0.7);
+  color: white;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlay-item:hover .overlay-item-delete {
+  opacity: 1;
+}
+
+/* Lane playhead indicator */
+.overlay-track-lane .lane-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent-primary-hover);
+  pointer-events: none;
+  z-index: 8;
+  opacity: 0.6;
+}
+
+/* Add track button */
+.btn-add-track {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: rgba(99, 102, 241, 0.15);
+  color: var(--text-muted);
+  border-style: dashed;
+  width: 100%;
+  justify-content: center;
+}
+
+.btn-add-track:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: var(--accent-primary-hover);
+}
+
+/* ── Overlay Edit Popover ─────────────────────────────────────── */
+.overlay-edit-popover {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 380px;
+  max-width: 92vw;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.15);
+  z-index: 150;
+  animation: popover-in 0.2s ease;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.popover-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.popover-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.popover-close:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.popover-body {
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.popover-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.popover-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+  transition: border-color var(--transition-fast);
+  resize: vertical;
+}
+
+.popover-input:focus {
+  border-color: var(--border-active);
+}
+
+.popover-input-sm {
+  width: 100%;
+}
+
+.popover-row {
+  display: flex;
+  gap: 12px;
+}
+
+.popover-field {
+  flex: 1;
+}
+
+.popover-color {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.popover-save {
+  margin-top: 4px;
+  width: 100%;
+  justify-content: center;
+}
+
+/* Popover backdrop */
+.overlay-edit-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 149;
+}
+
 /* ── Responsive ───────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .app {
@@ -952,5 +1351,25 @@ body::before {
 
   .actions-spacer {
     display: none;
+  }
+
+  .overlay-tracks-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .overlay-track-row {
+    flex-direction: column;
+  }
+
+  .overlay-track-sidebar {
+    flex-direction: row;
+    justify-content: space-between;
+    min-width: unset;
+  }
+
+  .overlay-track-lane {
+    height: 48px;
   }
 }

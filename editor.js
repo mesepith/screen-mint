@@ -47,6 +47,21 @@
     const processingOverlay = document.getElementById('processingOverlay');
     const toast = document.getElementById('toast');
 
+    // Overlay Tracks DOM
+    const overlayCanvas = document.getElementById('overlayCanvas');
+    const overlayCtx = overlayCanvas.getContext('2d');
+    const overlayTracksContainer = document.getElementById('overlayTracksContainer');
+    const addTrackBtn = document.getElementById('addTrackBtn');
+    const overlayEditPopover = document.getElementById('overlayEditPopover');
+    const popoverClose = document.getElementById('popoverClose');
+    const popoverText = document.getElementById('popoverText');
+    const popoverFontSize = document.getElementById('popoverFontSize');
+    const popoverColor = document.getElementById('popoverColor');
+    const popoverDuration = document.getElementById('popoverDuration');
+    const popoverX = document.getElementById('popoverX');
+    const popoverY = document.getElementById('popoverY');
+    const popoverSave = document.getElementById('popoverSave');
+
     // ── State ──────────────────────────────────────────────────────
     let videoBlob = null;
     let videoDuration = 0;
@@ -58,6 +73,13 @@
     let selectedSegIdx = null;  // index of currently selected segment, or null
     let isDraggingPlayhead = false; // true when user is dragging the playhead
     let undoStack = [];         // undo history [{splitPoints, removedFlags}]
+
+    // ── Overlay Tracks State ──────────────────────────────────────
+    let overlayTracks = [];       // [{id, name, items: [{id, type, start, duration, content, fontSize, color, x, y, imageSrc, imageEl}]}]
+    let overlayIdCounter = 0;
+    let editingOverlay = null;    // {trackId, itemId} or null
+    let draggingOverlayItem = null; // drag state for overlay items
+    let overlayImageCache = {};   // id -> HTMLImageElement
 
     function saveUndoState() {
         undoStack.push({
@@ -193,6 +215,10 @@
                     }
                 }
             }
+
+            // Render overlay preview & update lane playheads
+            renderOverlayPreview(ct);
+            updateLanePlayheads(pct);
         }
         updateTimeDisplay();
     });
@@ -330,6 +356,8 @@
         if (videoDuration > 0) {
             drawWaveform();
             renderTimeline();
+            renderOverlayTracks();
+            resizeOverlayCanvas();
         }
     });
 
@@ -754,6 +782,8 @@
                 }
 
                 ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+                // Composite overlay items for current time
+                drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, tempVideo.currentTime);
                 animFrameId = requestAnimationFrame(drawFrame);
             }
 
@@ -830,9 +860,469 @@
         setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── OVERLAY TRACKS ───────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+
+    function resizeOverlayCanvas() {
+        const wrapper = videoPlayer.parentElement;
+        if (!wrapper) return;
+        overlayCanvas.width = wrapper.clientWidth * window.devicePixelRatio;
+        overlayCanvas.height = wrapper.clientHeight * window.devicePixelRatio;
+        overlayCanvas.style.width = wrapper.clientWidth + 'px';
+        overlayCanvas.style.height = wrapper.clientHeight + 'px';
+        overlayCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    }
+
+    videoPlayer.addEventListener('loadeddata', resizeOverlayCanvas);
+    window.addEventListener('resize', resizeOverlayCanvas);
+
+    // ── Track CRUD ────────────────────────────────────────────────
+    function generateOverlayId() {
+        return ++overlayIdCounter;
+    }
+
+    function addTrack() {
+        const id = generateOverlayId();
+        overlayTracks.push({
+            id,
+            name: `Track ${overlayTracks.length + 1}`,
+            items: []
+        });
+        renderOverlayTracks();
+        showToast('🎞️', `Added overlay track`);
+    }
+
+    function removeTrack(trackId) {
+        overlayTracks = overlayTracks.filter(t => t.id !== trackId);
+        renderOverlayTracks();
+        renderOverlayPreview(videoPlayer.currentTime);
+        showToast('🗑️', 'Track removed');
+    }
+
+    function getTrack(trackId) {
+        return overlayTracks.find(t => t.id === trackId);
+    }
+
+    function getOverlayItem(trackId, itemId) {
+        const track = getTrack(trackId);
+        if (!track) return null;
+        return track.items.find(i => i.id === itemId);
+    }
+
+    addTrackBtn.addEventListener('click', addTrack);
+
+    // ── Add Text Overlay ──────────────────────────────────────────
+    function addTextOverlay(trackId) {
+        const track = getTrack(trackId);
+        if (!track) return;
+        const start = videoPlayer.currentTime || 0;
+        const item = {
+            id: generateOverlayId(),
+            type: 'text',
+            start: start,
+            duration: 3,
+            content: 'Text',
+            fontSize: 32,
+            color: '#ffffff',
+            x: 50,  // percentage
+            y: 50
+        };
+        track.items.push(item);
+        renderOverlayTracks();
+        renderOverlayPreview(videoPlayer.currentTime);
+        // Open editor immediately
+        openOverlayEditor(trackId, item.id);
+    }
+
+    // ── Add Image Overlay ─────────────────────────────────────────
+    function addImageOverlay(trackId) {
+        const track = getTrack(trackId);
+        if (!track) return;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const img = new Image();
+                img.onload = () => {
+                    const id = generateOverlayId();
+                    const item = {
+                        id,
+                        type: 'image',
+                        start: videoPlayer.currentTime || 0,
+                        duration: 5,
+                        imageSrc: ev.target.result,
+                        imageWidth: 20,  // percentage of video width
+                        imageHeight: 0,  // auto-calculated
+                        x: 50,
+                        y: 50
+                    };
+                    // Calculate aspect ratio
+                    item.imageHeight = (img.naturalHeight / img.naturalWidth) * item.imageWidth;
+                    track.items.push(item);
+                    // Cache image element
+                    overlayImageCache[id] = img;
+                    renderOverlayTracks();
+                    renderOverlayPreview(videoPlayer.currentTime);
+                    showToast('🖼️', 'Image overlay added');
+                };
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    }
+
+    // ── Remove Overlay Item ───────────────────────────────────────
+    function removeOverlayItem(trackId, itemId) {
+        const track = getTrack(trackId);
+        if (!track) return;
+        track.items = track.items.filter(i => i.id !== itemId);
+        delete overlayImageCache[itemId];
+        renderOverlayTracks();
+        renderOverlayPreview(videoPlayer.currentTime);
+    }
+
+    // ── Overlay Editor Popover ────────────────────────────────────
+    let popoverBackdrop = null;
+
+    function openOverlayEditor(trackId, itemId) {
+        const item = getOverlayItem(trackId, itemId);
+        if (!item || item.type !== 'text') return;
+
+        editingOverlay = { trackId, itemId };
+        popoverText.value = item.content;
+        popoverFontSize.value = item.fontSize;
+        popoverColor.value = item.color;
+        popoverDuration.value = item.duration;
+        popoverX.value = item.x;
+        popoverY.value = item.y;
+
+        // Show backdrop
+        popoverBackdrop = document.createElement('div');
+        popoverBackdrop.className = 'overlay-edit-backdrop';
+        popoverBackdrop.addEventListener('click', closeOverlayEditor);
+        document.body.appendChild(popoverBackdrop);
+
+        // Move popover to body so it's a sibling of the backdrop (same stacking context)
+        document.body.appendChild(overlayEditPopover);
+        overlayEditPopover.style.display = 'block';
+        popoverText.focus();
+    }
+
+    function closeOverlayEditor() {
+        overlayEditPopover.style.display = 'none';
+        editingOverlay = null;
+        if (popoverBackdrop) {
+            popoverBackdrop.remove();
+            popoverBackdrop = null;
+        }
+    }
+
+    function saveOverlayEditor() {
+        if (!editingOverlay) return;
+        const item = getOverlayItem(editingOverlay.trackId, editingOverlay.itemId);
+        if (!item) { closeOverlayEditor(); return; }
+
+        item.content = popoverText.value || 'Text';
+        item.fontSize = parseInt(popoverFontSize.value) || 32;
+        item.color = popoverColor.value || '#ffffff';
+        item.duration = parseFloat(popoverDuration.value) || 3;
+        item.x = parseFloat(popoverX.value) || 50;
+        item.y = parseFloat(popoverY.value) || 50;
+
+        closeOverlayEditor();
+        renderOverlayTracks();
+        renderOverlayPreview(videoPlayer.currentTime);
+        showToast('✅', 'Overlay updated');
+    }
+
+    popoverClose.addEventListener('click', closeOverlayEditor);
+    popoverSave.addEventListener('click', saveOverlayEditor);
+
+    // ── Render Overlay Tracks in DOM ──────────────────────────────
+    function renderOverlayTracks() {
+        overlayTracksContainer.innerHTML = '';
+
+        if (overlayTracks.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'overlay-tracks-empty';
+            empty.textContent = 'No overlay tracks yet — click "Add Track" to get started';
+            overlayTracksContainer.appendChild(empty);
+            return;
+        }
+
+        overlayTracks.forEach((track, trackIdx) => {
+            const row = document.createElement('div');
+            row.className = 'overlay-track-row';
+            row.dataset.trackId = track.id;
+
+            // Sidebar
+            const sidebar = document.createElement('div');
+            sidebar.className = 'overlay-track-sidebar';
+
+            const label = document.createElement('div');
+            label.className = 'overlay-track-label';
+            label.textContent = track.name;
+            sidebar.appendChild(label);
+
+            const btns = document.createElement('div');
+            btns.className = 'overlay-track-btns';
+
+            // + Text button
+            const textBtn = document.createElement('button');
+            textBtn.className = 'overlay-track-btn';
+            textBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 4v3h5.5v12h3V7H19V4H5z"/></svg> Text';
+            textBtn.addEventListener('click', () => addTextOverlay(track.id));
+            btns.appendChild(textBtn);
+
+            // + Image button
+            const imgBtn = document.createElement('button');
+            imgBtn.className = 'overlay-track-btn';
+            imgBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg> Image';
+            imgBtn.addEventListener('click', () => addImageOverlay(track.id));
+            btns.appendChild(imgBtn);
+
+            // Delete track button
+            const delBtn = document.createElement('button');
+            delBtn.className = 'overlay-track-btn btn-delete-track';
+            delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+            delBtn.title = 'Delete track';
+            delBtn.addEventListener('click', () => {
+                if (confirm(`Delete "${track.name}" and all its overlays?`)) {
+                    removeTrack(track.id);
+                }
+            });
+            btns.appendChild(delBtn);
+
+            sidebar.appendChild(btns);
+            row.appendChild(sidebar);
+
+            // Lane
+            const lane = document.createElement('div');
+            lane.className = 'overlay-track-lane';
+            lane.dataset.trackId = track.id;
+
+            // Playhead indicator in lane
+            const lanePH = document.createElement('div');
+            lanePH.className = 'lane-playhead';
+            if (videoDuration > 0) {
+                lanePH.style.left = ((videoPlayer.currentTime / videoDuration) * 100) + '%';
+            }
+            lane.appendChild(lanePH);
+
+            // Render items
+            track.items.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'overlay-item ' + (item.type === 'text' ? 'overlay-item-text' : 'overlay-item-image');
+                el.dataset.itemId = item.id;
+                el.dataset.trackId = track.id;
+
+                if (videoDuration > 0) {
+                    const leftPct = (item.start / videoDuration) * 100;
+                    const widthPct = (item.duration / videoDuration) * 100;
+                    el.style.left = leftPct + '%';
+                    el.style.width = Math.max(widthPct, 0.5) + '%';
+                }
+
+                // Content preview
+                if (item.type === 'text') {
+                    const preview = document.createElement('span');
+                    preview.textContent = item.content;
+                    preview.style.pointerEvents = 'none';
+                    el.appendChild(preview);
+                } else if (item.type === 'image' && item.imageSrc) {
+                    const thumb = document.createElement('img');
+                    thumb.src = item.imageSrc;
+                    thumb.draggable = false;
+                    el.appendChild(thumb);
+                }
+
+                // Delete button
+                const delBtn = document.createElement('button');
+                delBtn.className = 'overlay-item-delete';
+                delBtn.textContent = '×';
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeOverlayItem(track.id, item.id);
+                });
+                el.appendChild(delBtn);
+
+                // Double-click to edit (text only)
+                if (item.type === 'text') {
+                    el.addEventListener('dblclick', (e) => {
+                        e.stopPropagation();
+                        openOverlayEditor(track.id, item.id);
+                    });
+                }
+
+                // Drag to reposition in time
+                el.addEventListener('mousedown', (e) => {
+                    if (e.target.classList.contains('overlay-item-delete')) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startOverlayDrag(e, track.id, item.id, lane);
+                });
+
+                el.addEventListener('touchstart', (e) => {
+                    if (e.target.classList.contains('overlay-item-delete')) return;
+                    e.stopPropagation();
+                    startOverlayDrag(e, track.id, item.id, lane);
+                }, { passive: false });
+
+                lane.appendChild(el);
+            });
+
+            row.appendChild(lane);
+            overlayTracksContainer.appendChild(row);
+        });
+    }
+
+    // ── Overlay Item Drag ─────────────────────────────────────────
+    function startOverlayDrag(e, trackId, itemId, laneEl) {
+        const item = getOverlayItem(trackId, itemId);
+        if (!item || videoDuration <= 0) return;
+
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const rect = laneEl.getBoundingClientRect();
+        const startPct = (clientX - rect.left) / rect.width;
+        const startTime = item.start;
+
+        draggingOverlayItem = { trackId, itemId, startPct, startTime, rect };
+        document.body.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+    }
+
+    document.addEventListener('mousemove', (e) => {
+        if (!draggingOverlayItem) return;
+        const item = getOverlayItem(draggingOverlayItem.trackId, draggingOverlayItem.itemId);
+        if (!item) { draggingOverlayItem = null; return; }
+
+        const rect = draggingOverlayItem.rect;
+        const currentPct = (e.clientX - rect.left) / rect.width;
+        const deltaPct = currentPct - draggingOverlayItem.startPct;
+        let newStart = draggingOverlayItem.startTime + deltaPct * videoDuration;
+        newStart = Math.max(0, Math.min(videoDuration - item.duration, newStart));
+        item.start = newStart;
+        renderOverlayTracks();
+        renderOverlayPreview(videoPlayer.currentTime);
+    });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!draggingOverlayItem) return;
+        const item = getOverlayItem(draggingOverlayItem.trackId, draggingOverlayItem.itemId);
+        if (!item) { draggingOverlayItem = null; return; }
+
+        const rect = draggingOverlayItem.rect;
+        const clientX = e.touches[0].clientX;
+        const currentPct = (clientX - rect.left) / rect.width;
+        const deltaPct = currentPct - draggingOverlayItem.startPct;
+        let newStart = draggingOverlayItem.startTime + deltaPct * videoDuration;
+        newStart = Math.max(0, Math.min(videoDuration - item.duration, newStart));
+        item.start = newStart;
+        renderOverlayTracks();
+        renderOverlayPreview(videoPlayer.currentTime);
+    }, { passive: true });
+
+    document.addEventListener('mouseup', () => {
+        if (draggingOverlayItem) {
+            draggingOverlayItem = null;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+
+    document.addEventListener('touchend', () => {
+        if (draggingOverlayItem) {
+            draggingOverlayItem = null;
+        }
+    });
+
+    // ── Update Lane Playheads ─────────────────────────────────────
+    function updateLanePlayheads(pct) {
+        const playheads = overlayTracksContainer.querySelectorAll('.lane-playhead');
+        playheads.forEach(ph => {
+            ph.style.left = pct + '%';
+        });
+    }
+
+    // ── Render Overlay Preview on Canvas ──────────────────────────
+    function renderOverlayPreview(currentTime) {
+        if (!overlayCanvas.width || !overlayCanvas.height) resizeOverlayCanvas();
+        const w = overlayCanvas.width / window.devicePixelRatio;
+        const h = overlayCanvas.height / window.devicePixelRatio;
+
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+        // Draw overlays in track order (index 0 = top priority = drawn LAST)
+        // So iterate in reverse: bottom tracks first, top tracks last (on top)
+        for (let t = overlayTracks.length - 1; t >= 0; t--) {
+            const track = overlayTracks[t];
+            for (const item of track.items) {
+                if (currentTime >= item.start && currentTime < item.start + item.duration) {
+                    drawSingleOverlay(overlayCtx, w, h, item);
+                }
+            }
+        }
+    }
+
+    function drawSingleOverlay(ctx, canvasW, canvasH, item) {
+        if (item.type === 'text') {
+            const x = (item.x / 100) * canvasW;
+            const y = (item.y / 100) * canvasH;
+            // Scale font size relative to canvas height
+            const scaledFontSize = (item.fontSize / 1080) * canvasH;
+            ctx.save();
+            ctx.font = `bold ${scaledFontSize}px Inter, Arial, sans-serif`;
+            ctx.fillStyle = item.color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            // Text shadow for readability
+            ctx.shadowColor = 'rgba(0,0,0,0.7)';
+            ctx.shadowBlur = scaledFontSize * 0.15;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = scaledFontSize * 0.05;
+            ctx.fillText(item.content, x, y);
+            ctx.restore();
+        } else if (item.type === 'image') {
+            let img = overlayImageCache[item.id];
+            if (!img) {
+                img = new Image();
+                img.src = item.imageSrc;
+                overlayImageCache[item.id] = img;
+            }
+            if (img.complete && img.naturalWidth > 0) {
+                const imgW = (item.imageWidth / 100) * canvasW;
+                const imgH = (item.imageHeight / 100) * canvasH;
+                const x = (item.x / 100) * canvasW - imgW / 2;
+                const y = (item.y / 100) * canvasH - imgH / 2;
+                ctx.drawImage(img, x, y, imgW, imgH);
+            }
+        }
+    }
+
+    // ── Draw Overlays On Encoder Canvas (for export) ──────────────
+    function drawOverlaysOnCanvas(ctx, canvasW, canvasH, currentTime) {
+        for (let t = overlayTracks.length - 1; t >= 0; t--) {
+            const track = overlayTracks[t];
+            for (const item of track.items) {
+                if (currentTime >= item.start && currentTime < item.start + item.duration) {
+                    drawSingleOverlay(ctx, canvasW, canvasH, item);
+                }
+            }
+        }
+    }
+
+    // Initial render
+    renderOverlayTracks();
+
     // ── Keyboard Shortcuts ────────────────────────────────────────
     document.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT') return;
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
         // Undo with Ctrl+Z / Cmd+Z
         if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
