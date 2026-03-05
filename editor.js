@@ -50,6 +50,7 @@
     // Overlay Tracks DOM
     const overlayCanvas = document.getElementById('overlayCanvas');
     const overlayCtx = overlayCanvas.getContext('2d');
+    const overlayInteractionLayer = document.getElementById('overlayInteractionLayer');
     const overlayTracksContainer = document.getElementById('overlayTracksContainer');
     const addTrackBtn = document.getElementById('addTrackBtn');
     const overlayEditPopover = document.getElementById('overlayEditPopover');
@@ -1399,6 +1400,9 @@
 
         overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
+        // Collect active image items for interaction boxes
+        const activeImageItems = [];
+
         // Draw overlays in track order (index 0 = top priority = drawn LAST)
         // So iterate in reverse: bottom tracks first, top tracks last (on top)
         for (let t = overlayTracks.length - 1; t >= 0; t--) {
@@ -1406,9 +1410,15 @@
             for (const item of track.items) {
                 if (currentTime >= item.start && currentTime < item.start + item.duration) {
                     drawSingleOverlay(overlayCtx, w, h, item);
+                    if (item.type === 'image') {
+                        activeImageItems.push({ trackId: track.id, item });
+                    }
                 }
             }
         }
+
+        // Render interactive bounding boxes for active image overlays
+        renderImageInteractionBoxes(activeImageItems, w, h);
     }
 
     function drawSingleOverlay(ctx, canvasW, canvasH, item) {
@@ -1460,6 +1470,120 @@
 
     // Initial render
     renderOverlayTracks();
+
+    // ── Image Interaction Boxes on Preview ────────────────────────
+    let imgResizeDrag = null; // {trackId, itemId, type:'corner'|'move', corner, startX, startY, origW, origH, origX, origY, layerW, layerH}
+
+    function renderImageInteractionBoxes(activeImageItems, layerW, layerH) {
+        // Don't rebuild if we're mid-drag (prevents flicker)
+        if (imgResizeDrag) return;
+
+        overlayInteractionLayer.innerHTML = '';
+        if (activeImageItems.length === 0) return;
+
+        for (const { trackId, item } of activeImageItems) {
+            const imgW = (item.imageWidth / 100) * layerW;
+            const imgH = (item.imageHeight / 100) * layerH;
+            const x = (item.x / 100) * layerW - imgW / 2;
+            const y = (item.y / 100) * layerH - imgH / 2;
+
+            // Bounding box
+            const box = document.createElement('div');
+            box.className = 'overlay-img-box';
+            box.style.left = x + 'px';
+            box.style.top = y + 'px';
+            box.style.width = imgW + 'px';
+            box.style.height = imgH + 'px';
+
+            // Drag to move
+            box.addEventListener('click', (e) => e.stopPropagation());
+            box.addEventListener('mousedown', (e) => {
+                if (e.target.classList.contains('overlay-corner-handle')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                imgResizeDrag = {
+                    trackId, itemId: item.id, type: 'move',
+                    startX: e.clientX, startY: e.clientY,
+                    origX: item.x, origY: item.y,
+                    layerW, layerH
+                };
+                document.body.style.cursor = 'move';
+                document.body.style.userSelect = 'none';
+            });
+
+            // Corner handles
+            ['tl', 'tr', 'bl', 'br'].forEach(corner => {
+                const handle = document.createElement('div');
+                handle.className = `overlay-corner-handle ${corner}`;
+                handle.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    imgResizeDrag = {
+                        trackId, itemId: item.id, type: 'corner', corner,
+                        startX: e.clientX, startY: e.clientY,
+                        origW: item.imageWidth, origH: item.imageHeight,
+                        origX: item.x, origY: item.y,
+                        layerW, layerH,
+                        aspectRatio: item.imageHeight / item.imageWidth
+                    };
+                    document.body.style.cursor = handle.style.cursor || 'nwse-resize';
+                    document.body.style.userSelect = 'none';
+                });
+                box.appendChild(handle);
+            });
+
+            overlayInteractionLayer.appendChild(box);
+        }
+    }
+
+    document.addEventListener('mousemove', (e) => {
+        if (!imgResizeDrag) return;
+        const item = getOverlayItem(imgResizeDrag.trackId, imgResizeDrag.itemId);
+        if (!item) { imgResizeDrag = null; return; }
+
+        const dx = e.clientX - imgResizeDrag.startX;
+        const dy = e.clientY - imgResizeDrag.startY;
+
+        if (imgResizeDrag.type === 'move') {
+            // Convert pixel delta to percentage
+            const dxPct = (dx / imgResizeDrag.layerW) * 100;
+            const dyPct = (dy / imgResizeDrag.layerH) * 100;
+            item.x = Math.max(0, Math.min(100, imgResizeDrag.origX + dxPct));
+            item.y = Math.max(0, Math.min(100, imgResizeDrag.origY + dyPct));
+        } else {
+            // Corner resize — proportional scaling
+            const corner = imgResizeDrag.corner;
+            const dxPct = (dx / imgResizeDrag.layerW) * 100;
+            const dyPct = (dy / imgResizeDrag.layerH) * 100;
+
+            let scaleX = 1, scaleY = 1;
+            if (corner === 'br') {
+                scaleX = 1 + dxPct / imgResizeDrag.origW;
+            } else if (corner === 'bl') {
+                scaleX = 1 - dxPct / imgResizeDrag.origW;
+            } else if (corner === 'tr') {
+                scaleX = 1 + dxPct / imgResizeDrag.origW;
+            } else if (corner === 'tl') {
+                scaleX = 1 - dxPct / imgResizeDrag.origW;
+            }
+
+            // Use uniform scale to maintain aspect ratio
+            const scale = Math.max(0.02, scaleX);
+            item.imageWidth = imgResizeDrag.origW * scale;
+            item.imageHeight = imgResizeDrag.origW * scale * imgResizeDrag.aspectRatio;
+        }
+
+        renderOverlayPreview(videoPlayer.currentTime);
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (imgResizeDrag) {
+            imgResizeDrag = null;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            renderOverlayPreview(videoPlayer.currentTime);
+        }
+    });
 
     // ── Keyboard Shortcuts ────────────────────────────────────────
     document.addEventListener('keydown', (e) => {

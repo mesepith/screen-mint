@@ -934,6 +934,68 @@ body::before {
   z-index: 4;
 }
 
+/* Overlay Interaction Layer (for interactive resize handles on preview) */
+.overlay-interaction-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Image bounding box shown on the preview */
+.overlay-img-box {
+  position: absolute;
+  pointer-events: auto;
+  cursor: move;
+  border: 1.5px dashed rgba(99, 102, 241, 0.7);
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+
+.overlay-img-box:hover {
+  border-color: rgba(99, 102, 241, 1);
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.3);
+}
+
+/* Corner resize handles */
+.overlay-corner-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: rgba(99, 102, 241, 0.9);
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  pointer-events: auto;
+  z-index: 6;
+  box-sizing: border-box;
+}
+
+.overlay-corner-handle.tl {
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+
+.overlay-corner-handle.tr {
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
+}
+
+.overlay-corner-handle.bl {
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
+}
+
+.overlay-corner-handle.br {
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
+}
+
 /* Section wrapper */
 .overlay-tracks-section {
   background: var(--bg-secondary);
