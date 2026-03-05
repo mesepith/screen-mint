@@ -1008,6 +1008,104 @@ body::before {
   cursor: nwse-resize;
 }
 
+/* Overlay toolbar (shown below active bounding box) */
+.overlay-toolbar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: -38px;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  background: rgba(15, 15, 25, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+  padding: 4px 6px;
+  z-index: 12;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.overlay-img-box.active .overlay-toolbar {
+  display: flex;
+}
+
+.overlay-toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #c5c6d0;
+  font-size: 11px;
+  font-family: Inter, Arial, sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.overlay-toolbar-btn:hover {
+  background: rgba(99, 102, 241, 0.2);
+  color: #fff;
+}
+
+.overlay-toolbar-btn.active {
+  background: rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+}
+
+.overlay-toolbar-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+/* Transparency slider panel */
+.overlay-transparency-panel {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  background: rgba(15, 15, 25, 0.9);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  z-index: 13;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.overlay-transparency-panel.open {
+  display: flex;
+}
+
+.overlay-transparency-panel label {
+  font-size: 11px;
+  color: #8b8fa3;
+  font-family: Inter, Arial, sans-serif;
+}
+
+.overlay-transparency-panel input[type="range"] {
+  width: 100px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.overlay-transparency-panel .transparency-value {
+  font-size: 11px;
+  color: #c5c6d0;
+  min-width: 28px;
+  text-align: right;
+  font-family: Inter, Arial, sans-serif;
+}
+
 /* Section wrapper */
 .overlay-tracks-section {
   background: var(--bg-secondary);

@@ -966,7 +966,8 @@
             fontSize: 32,
             color: '#ffffff',
             x: 50,  // percentage
-            y: 50
+            y: 50,
+            opacity: 100
         };
         track.items.push(item);
         renderOverlayTracks();
@@ -999,7 +1000,8 @@
                         imageWidth: 20,  // percentage of video width
                         imageHeight: 0,  // auto-calculated
                         x: 50,
-                        y: 50
+                        y: 50,
+                        opacity: 100
                     };
                     // Calculate aspect ratio
                     item.imageHeight = (img.naturalHeight / img.naturalWidth) * item.imageWidth;
@@ -1438,12 +1440,15 @@
     }
 
     function drawSingleOverlay(ctx, canvasW, canvasH, item) {
+        const alpha = (item.opacity != null ? item.opacity : 100) / 100;
+
         if (item.type === 'text') {
             const x = (item.x / 100) * canvasW;
             const y = (item.y / 100) * canvasH;
             // Scale font size relative to canvas height
             const scaledFontSize = (item.fontSize / 1080) * canvasH;
             ctx.save();
+            ctx.globalAlpha = alpha;
             ctx.font = `bold ${scaledFontSize}px Inter, Arial, sans-serif`;
             ctx.fillStyle = item.color;
             ctx.textAlign = 'center';
@@ -1467,7 +1472,10 @@
                 const imgH = (item.imageHeight / 100) * canvasH;
                 const x = (item.x / 100) * canvasW - imgW / 2;
                 const y = (item.y / 100) * canvasH - imgH / 2;
+                ctx.save();
+                ctx.globalAlpha = alpha;
                 ctx.drawImage(img, x, y, imgW, imgH);
+                ctx.restore();
             }
         }
     }
@@ -1490,11 +1498,13 @@
     // ── Interaction Boxes on Preview ──────────────────────────────
     let interactionDrag = null; // {trackId, itemId, type:'corner'|'move', corner, startX, startY, origW, origH, origFontSize, origX, origY, layerW, layerH, aspectRatio}
     let selectedOverlayItem = null; // {trackId, itemId}
+    let toolbarInteracting = false; // Prevent DOM rebuild while using slider
 
     function renderInteractionBoxes(activeItems, layerW, layerH) {
         const isDragging = !!interactionDrag;
+        const skipRebuild = isDragging || toolbarInteracting;
 
-        if (!isDragging) {
+        if (!skipRebuild) {
             overlayInteractionLayer.innerHTML = '';
             if (activeItems.length === 0) {
                 // Restore play overlay visibility if video is paused
@@ -1524,7 +1534,7 @@
             const boxId = `interaction-box-${trackId}-${item.id}`;
             let box = document.getElementById(boxId);
 
-            if (!box && !isDragging) {
+            if (!box && !skipRebuild) {
                 box = document.createElement('div');
                 box.id = boxId;
                 box.className = 'overlay-img-box';
@@ -1574,6 +1584,65 @@
                     });
                     box.appendChild(handle);
                 });
+
+                // Toolbar (appears below the box when selected)
+                const toolbar = document.createElement('div');
+                toolbar.className = 'overlay-toolbar';
+                toolbar.addEventListener('mousedown', (e) => e.stopPropagation());
+                toolbar.addEventListener('click', (e) => e.stopPropagation());
+
+                // Transparency button
+                const transparencyBtn = document.createElement('button');
+                transparencyBtn.className = 'overlay-toolbar-btn';
+                transparencyBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31A7.903 7.903 0 0 1 12 20z"/></svg> Opacity`;
+                transparencyBtn.title = 'Adjust transparency';
+
+                // Transparency slider panel
+                const transparencyPanel = document.createElement('div');
+                transparencyPanel.className = 'overlay-transparency-panel';
+
+                const slider = document.createElement('input');
+                slider.type = 'range';
+                slider.min = '0';
+                slider.max = '100';
+                slider.value = item.opacity != null ? item.opacity : 100;
+
+                const valueLabel = document.createElement('span');
+                valueLabel.className = 'transparency-value';
+                valueLabel.textContent = slider.value + '%';
+
+                slider.addEventListener('input', (e) => {
+                    const val = parseInt(e.target.value);
+                    const currentItem = getOverlayItem(trackId, item.id);
+                    if (currentItem) {
+                        currentItem.opacity = val;
+                        valueLabel.textContent = val + '%';
+                        renderOverlayPreview(videoPlayer.currentTime);
+                    }
+                });
+
+                slider.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    toolbarInteracting = true;
+                });
+                document.addEventListener('mouseup', () => {
+                    if (toolbarInteracting) {
+                        toolbarInteracting = false;
+                    }
+                });
+
+                transparencyPanel.appendChild(slider);
+                transparencyPanel.appendChild(valueLabel);
+
+                transparencyBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    transparencyBtn.classList.toggle('active');
+                    transparencyPanel.classList.toggle('open');
+                });
+
+                toolbar.appendChild(transparencyBtn);
+                toolbar.appendChild(transparencyPanel);
+                box.appendChild(toolbar);
 
                 overlayInteractionLayer.appendChild(box);
             }
