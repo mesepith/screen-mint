@@ -1479,7 +1479,15 @@
         if (imgResizeDrag) return;
 
         overlayInteractionLayer.innerHTML = '';
-        if (activeImageItems.length === 0) return;
+
+        if (activeImageItems.length === 0) {
+            // Restore play overlay visibility if video is paused
+            if (videoPlayer.paused) playOverlay.classList.remove('hidden');
+            return;
+        }
+
+        // Hide play overlay so it doesn't obstruct the image being edited
+        playOverlay.classList.add('hidden');
 
         for (const { trackId, item } of activeImageItems) {
             const imgW = (item.imageWidth / 100) * layerW;
