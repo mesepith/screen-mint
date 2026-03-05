@@ -597,9 +597,10 @@
         if (!videoBlob) return;
 
         const hasAnyRemoved = removedFlags.some(f => f);
+        const hasAnyOverlays = overlayTracks.some(t => t.items.length > 0);
 
-        if (!hasAnyRemoved) {
-            // No cuts — download original
+        if (!hasAnyRemoved && !hasAnyOverlays) {
+            // No cuts and no overlays — download original
             downloadBlob(videoBlob, videoFileName);
             showToast('⬇️', 'Downloading original recording…');
             return;
@@ -642,6 +643,7 @@
             const url = URL.createObjectURL(blob);
             const tempVideo = document.createElement('video');
             tempVideo.muted = true;
+            tempVideo.preload = 'auto';
             tempVideo.src = url;
 
             let currentSegIndex = 0;
@@ -650,16 +652,9 @@
             let canvas, ctx, canvasStream, recOptions;
             let animFrameId = null;
 
+            // No need to fix Infinity duration — encoder uses segment times from the main player
             tempVideo.addEventListener('loadedmetadata', () => {
-                if (!isFinite(tempVideo.duration)) {
-                    tempVideo.currentTime = 1e10;
-                    tempVideo.addEventListener('seeked', function seekOnce() {
-                        tempVideo.removeEventListener('seeked', seekOnce);
-                        setupRecorder();
-                    }, { once: true });
-                } else {
-                    setupRecorder();
-                }
+                setupRecorder();
             });
 
             tempVideo.addEventListener('error', () => {
@@ -725,14 +720,24 @@
 
             let finished = false;
             let seeking = false;
+            let encodingTimeout = null;
 
             function finishRecording() {
                 if (finished) return;
                 finished = true;
+                if (encodingTimeout) clearTimeout(encodingTimeout);
                 tempVideo.pause();
                 if (animFrameId) cancelAnimationFrame(animFrameId);
-                if (recorder && recorder.state === 'recording') {
-                    recorder.stop();
+                // Force stop regardless of state
+                try {
+                    if (recorder && recorder.state !== 'inactive') {
+                        recorder.stop();
+                    }
+                } catch (_e) {
+                    // If stop fails, resolve with whatever we have
+                    URL.revokeObjectURL(url);
+                    const finalBlob = new Blob(chunks, { type: recOptions.mimeType });
+                    resolve(finalBlob);
                 }
             }
 
@@ -745,15 +750,30 @@
 
                 seeking = true;
                 onProgress(`Encoding segment ${idx + 1} of ${segments.length}…`);
-                tempVideo.currentTime = segments[idx].start;
+
+                const targetTime = segments[idx].start;
+
+                // If already at the target (e.g., seeking to 0 when already at 0),
+                // start immediately — seeked event won't fire for no-op seeks
+                if (Math.abs(tempVideo.currentTime - targetTime) < 0.05) {
+                    seeking = false;
+                    tempVideo.play().catch(() => {
+                        advanceToNextSegment();
+                    });
+                    drawFrame();
+                    return;
+                }
+
+                tempVideo.currentTime = targetTime;
 
                 tempVideo.addEventListener('seeked', function onSeeked() {
                     tempVideo.removeEventListener('seeked', onSeeked);
                     if (finished) return;
                     seeking = false;
-                    tempVideo.muted = false;
-                    tempVideo.volume = 1;
-                    tempVideo.play();
+                    tempVideo.play().catch(() => {
+                        // play() failed — advance anyway
+                        advanceToNextSegment();
+                    });
                     drawFrame();
                 }, { once: true });
             }
@@ -782,12 +802,16 @@
                 }
 
                 ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
-                // Composite overlay items for current time
-                drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, tempVideo.currentTime);
+                // Composite overlay items — wrapped in try-catch to prevent rAF loop from breaking
+                try {
+                    drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, tempVideo.currentTime);
+                } catch (e) {
+                    console.warn('Overlay draw error:', e);
+                }
                 animFrameId = requestAnimationFrame(drawFrame);
             }
 
-            // Safety net for segment boundary
+            // Safety net: timeupdate for segment boundary
             tempVideo.addEventListener('timeupdate', () => {
                 if (finished || seeking || currentSegIndex >= segments.length) return;
                 const seg = segments[currentSegIndex];
@@ -796,6 +820,21 @@
                     advanceToNextSegment();
                 }
             });
+
+            // Safety net: video ended event
+            tempVideo.addEventListener('ended', () => {
+                if (!finished) {
+                    advanceToNextSegment();
+                }
+            });
+
+            // Ultimate timeout safety net (5 min max for any video)
+            encodingTimeout = setTimeout(() => {
+                if (!finished) {
+                    console.warn('Encoding timed out, finishing with available data');
+                    finishRecording();
+                }
+            }, 5 * 60 * 1000);
         });
     }
 
