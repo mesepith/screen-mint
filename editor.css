@@ -949,13 +949,18 @@ body::before {
   position: absolute;
   pointer-events: auto;
   cursor: move;
-  border: 1.5px dashed rgba(99, 102, 241, 0.7);
+  border: 1.5px dashed transparent;
   border-radius: 3px;
   box-sizing: border-box;
+  transition: border-color var(--transition-fast);
 }
 
 .overlay-img-box:hover {
-  border-color: rgba(99, 102, 241, 1);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.overlay-img-box.active {
+  border-color: rgba(99, 102, 241, 0.9);
   box-shadow: 0 0 8px rgba(99, 102, 241, 0.3);
 }
 
@@ -970,6 +975,13 @@ body::before {
   pointer-events: auto;
   z-index: 6;
   box-sizing: border-box;
+  display: none;
+  /* Hidden by default */
+}
+
+/* Show handles only when the bounding box is selected/active */
+.overlay-img-box.active .overlay-corner-handle {
+  display: block;
 }
 
 .overlay-corner-handle.tl {

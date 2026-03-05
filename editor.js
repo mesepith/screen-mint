@@ -1489,6 +1489,7 @@
 
     // ── Interaction Boxes on Preview ──────────────────────────────
     let interactionDrag = null; // {trackId, itemId, type:'corner'|'move', corner, startX, startY, origW, origH, origFontSize, origX, origY, layerW, layerH, aspectRatio}
+    let selectedOverlayItem = null; // {trackId, itemId}
 
     function renderInteractionBoxes(activeItems, layerW, layerH) {
         // Don't rebuild if we're mid-drag (prevents flicker)
@@ -1522,6 +1523,9 @@
             // Bounding box
             const box = document.createElement('div');
             box.className = 'overlay-img-box';
+            if (selectedOverlayItem && selectedOverlayItem.trackId === trackId && selectedOverlayItem.itemId === item.id) {
+                box.classList.add('active');
+            }
             box.style.left = x + 'px';
             box.style.top = y + 'px';
             box.style.width = itemW + 'px';
@@ -1530,6 +1534,12 @@
             // Drag to move
             box.addEventListener('click', (e) => e.stopPropagation());
             box.addEventListener('mousedown', (e) => {
+                // Select this item and re-render to show handles
+                if (!selectedOverlayItem || selectedOverlayItem.trackId !== trackId || selectedOverlayItem.itemId !== item.id) {
+                    selectedOverlayItem = { trackId, itemId: item.id };
+                    renderOverlayPreview(videoPlayer.currentTime);
+                }
+
                 if (e.target.classList.contains('overlay-corner-handle')) return;
                 e.preventDefault();
                 e.stopPropagation();
@@ -1625,6 +1635,14 @@
             interactionDrag = null;
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
+            renderOverlayPreview(videoPlayer.currentTime);
+        }
+    });
+
+    // Clear selection on click outside
+    document.addEventListener('mousedown', (e) => {
+        if (!e.target.closest('.overlay-img-box') && !e.target.closest('.overlay-corner-handle') && selectedOverlayItem) {
+            selectedOverlayItem = null;
             renderOverlayPreview(videoPlayer.currentTime);
         }
     });
