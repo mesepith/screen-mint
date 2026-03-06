@@ -22,6 +22,9 @@
     const volumeOffIcon = document.getElementById('volumeOffIcon');
     const volumeSlider = document.getElementById('volumeSlider');
     const recordingInfo = document.getElementById('recordingInfo');
+    const videoSizeSlider = document.getElementById('videoSizeSlider');
+    const videoContainer = document.querySelector('.video-container');
+    const videoWrapper = document.querySelector('.video-wrapper');
 
     // Timeline
     const timeline = document.getElementById('timeline');
@@ -332,6 +335,18 @@
             volumeOnIcon.style.display = 'block';
             volumeOffIcon.style.display = 'none';
         }
+    });
+
+    // ── Video Sizing ──────────────────────────────────────────────
+    // Update purely CSS width immediately on drag for buttery smoothness
+    videoSizeSlider.addEventListener('input', () => {
+        videoWrapper.style.width = videoSizeSlider.value + '%';
+    });
+
+    // Re-render heavy canvases only when user stops dragging
+    videoSizeSlider.addEventListener('change', () => {
+        resizeOverlayCanvas();
+        renderOverlayPreview(videoPlayer.currentTime);
     });
 
     // ── Waveform ──────────────────────────────────────────────────

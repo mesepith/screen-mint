@@ -222,6 +222,8 @@ body::before {
   overflow: hidden;
   box-shadow: var(--shadow-lg);
   margin-bottom: 0;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .video-toolbar {
@@ -275,6 +277,8 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: center;
+  margin: 0 auto;
+  transition: width 0.1s ease-out;
 }
 
 #videoPlayer {
