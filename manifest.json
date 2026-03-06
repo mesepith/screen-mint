@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Screen Mint – Screen Recorder & Video Editor",
-  "version": "1.2",
-  "description": "Record your screen and instantly trim recordings with a built-in video editor",
+  "version": "1.4",
+  "description": "Record your screen, trim unwanted parts, add custom text, image with a built-in multi-track video editor.",
   "permissions": [
     "desktopCapture",
     "offscreen",
