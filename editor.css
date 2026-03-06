@@ -224,6 +224,49 @@ body::before {
   margin-bottom: 0;
 }
 
+.video-toolbar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 36, 0.85);
+  /* Semi-transparent dark bg */
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 20;
+  /* Above interaction layers */
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.video-toolbar.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -10px);
+}
+
+.video-toolbar .btn-split {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #000000;
+  font-weight: 600;
+}
+
+.video-toolbar .btn-split:hover {
+  background: #f0f0f0;
+  border-color: #f0f0f0;
+  color: #000000;
+}
+
+.video-toolbar .btn-split svg {
+  fill: #000000;
+}
+
 .video-wrapper {
   position: relative;
   width: 100%;

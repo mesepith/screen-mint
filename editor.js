@@ -33,6 +33,7 @@
     const timelineLabelEnd = document.getElementById('timelineLabelEnd');
 
     // Controls
+    const videoToolbar = document.getElementById('videoToolbar');
     const splitBtn = document.getElementById('splitBtn');
     const removeSectionBtn = document.getElementById('removeSectionBtn');
     const restoreSectionBtn = document.getElementById('restoreSectionBtn');
@@ -179,6 +180,7 @@
         playIcon.style.display = 'none';
         pauseIcon.style.display = 'block';
         playOverlay.classList.add('hidden');
+        videoToolbar.classList.add('hidden');
     });
 
     videoPlayer.addEventListener('pause', () => {
@@ -289,11 +291,13 @@
         isDraggingPlayhead = false;
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
+        videoToolbar.classList.remove('hidden');
     });
 
     document.addEventListener('touchend', () => {
         if (!isDraggingPlayhead) return;
         isDraggingPlayhead = false;
+        videoToolbar.classList.remove('hidden');
     });
 
     // ── Click anywhere on timeline to move playhead ───────────────
@@ -307,6 +311,7 @@
         timelinePlayhead.style.left = displayPct + '%';
         progressFilled.style.width = displayPct + '%';
         updateTimeDisplay();
+        videoToolbar.classList.remove('hidden');
     });
 
     // ── Volume ────────────────────────────────────────────────────
@@ -401,6 +406,7 @@
     // ── Split at playhead ─────────────────────────────────────────
     splitBtn.addEventListener('click', () => {
         addSplit(videoPlayer.currentTime);
+        videoToolbar.classList.add('hidden');
     });
 
     function addSplit(time) {
@@ -562,6 +568,7 @@
                 timelinePlayhead.style.left = displayPct + '%';
                 progressFilled.style.width = displayPct + '%';
                 updateTimeDisplay();
+                videoToolbar.classList.remove('hidden');
 
                 // Only allow segment selection when there are actual splits
                 if (splitPoints.length > 0) {
