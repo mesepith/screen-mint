@@ -271,7 +271,7 @@ body::before {
 
 .video-wrapper {
   position: relative;
-  width: 100%;
+  width: 30%;
   aspect-ratio: 16 / 9;
   background: #000;
   display: flex;
