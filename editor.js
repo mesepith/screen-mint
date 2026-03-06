@@ -296,6 +296,19 @@
         isDraggingPlayhead = false;
     });
 
+    // ── Click anywhere on timeline to move playhead ───────────────
+    timeline.addEventListener('click', (e) => {
+        if (isDraggingPlayhead) return;
+        const rect = timeline.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const time = snapToKept(pct * videoDuration);
+        videoPlayer.currentTime = time;
+        const displayPct = (time / videoDuration) * 100;
+        timelinePlayhead.style.left = displayPct + '%';
+        progressFilled.style.width = displayPct + '%';
+        updateTimeDisplay();
+    });
+
     // ── Volume ────────────────────────────────────────────────────
     muteBtn.addEventListener('click', () => {
         videoPlayer.muted = !videoPlayer.muted;
@@ -538,7 +551,6 @@
             // Click to select this segment (but not during playhead drag)
             el.addEventListener('click', (e) => {
                 if (isDraggingPlayhead) return;
-                e.stopPropagation();
                 selectSegment(idx);
             });
 
