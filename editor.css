@@ -1110,9 +1110,10 @@ body::before {
 .overlay-tracks-section {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  border-top: none;
+  border-radius: 0;
   padding: 20px 20px 24px;
-  margin-bottom: 24px;
+  margin-bottom: 0px;
 }
 
 .overlay-tracks-header {
