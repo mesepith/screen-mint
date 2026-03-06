@@ -1118,10 +1118,6 @@
         overlayTracksContainer.innerHTML = '';
 
         if (overlayTracks.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'overlay-tracks-empty';
-            empty.textContent = 'No overlay tracks yet — click "Add Track" to get started';
-            overlayTracksContainer.appendChild(empty);
             return;
         }
 

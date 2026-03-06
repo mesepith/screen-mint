@@ -47,6 +47,23 @@
                     <span class="badge-dot"></span>
                     <span id="recordingInfo">Ready</span>
                 </div>
+                <!-- Action Buttons -->
+                <div class="actions" style="margin-left: 12px;">
+                    <button class="action-btn btn-discard" id="discardBtn"
+                        style="padding: 8px 16px; font-size: 0.8rem;">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                        </svg>
+                        Discard
+                    </button>
+                    <button class="action-btn btn-download" id="downloadBtn"
+                        style="padding: 8px 16px; font-size: 0.8rem;">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                        </svg>
+                        Download
+                    </button>
+                </div>
             </div>
         </header>
 
@@ -110,16 +127,6 @@
 
         <!-- Overlay Tracks Section -->
         <div class="overlay-tracks-section" id="overlayTracksSection">
-            <div class="overlay-tracks-header">
-                <div class="overlay-tracks-title">
-                    <svg viewBox="0 0 24 24">
-                        <path
-                            d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12zM10 9h8v2h-8V9zm0 3h4v2h-4v-2zm0-6h8v2h-8V6z" />
-                    </svg>
-                    Overlay Tracks
-                </div>
-                <span class="overlay-tracks-info">Add text or image overlays — top tracks render on top</span>
-            </div>
 
             <div class="overlay-tracks-container" id="overlayTracksContainer">
                 <!-- Track rows will be rendered here by JS -->
@@ -237,22 +244,7 @@
             </div>
         </div>
 
-        <!-- Action Buttons -->
-        <div class="actions">
-            <button class="action-btn btn-download" id="downloadBtn">
-                <svg viewBox="0 0 24 24">
-                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
-                </svg>
-                Download
-            </button>
-            <div class="actions-spacer"></div>
-            <button class="action-btn btn-discard" id="discardBtn">
-                <svg viewBox="0 0 24 24">
-                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
-                </svg>
-                Discard
-            </button>
-        </div>
+
     </div>
 
     <script src="editor.js"></script>
