@@ -505,7 +505,7 @@
 
     // ── Select a segment ──────────────────────────────────────────
     function selectSegment(index) {
-        selectedSegIdx = (selectedSegIdx === index) ? null : index;
+        selectedSegIdx = index;
         renderTimeline();
         updateControls();
     }
@@ -551,7 +551,22 @@
             // Click to select this segment (but not during playhead drag)
             el.addEventListener('click', (e) => {
                 if (isDraggingPlayhead) return;
-                selectSegment(idx);
+                e.stopPropagation();
+
+                // Always move playhead to clicked position
+                const rect = timeline.getBoundingClientRect();
+                const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                const time = snapToKept(pct * videoDuration);
+                videoPlayer.currentTime = time;
+                const displayPct = (time / videoDuration) * 100;
+                timelinePlayhead.style.left = displayPct + '%';
+                progressFilled.style.width = displayPct + '%';
+                updateTimeDisplay();
+
+                // Only allow segment selection when there are actual splits
+                if (splitPoints.length > 0) {
+                    selectSegment(idx);
+                }
             });
 
             timelineSegmentsLayer.appendChild(el);
