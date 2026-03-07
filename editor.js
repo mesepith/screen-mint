@@ -1898,7 +1898,12 @@
                 }
                 break;
             case 'Escape':
-                // Deselect
+                // Hide inline track menu if open
+                const menu = document.getElementById('inlineTrackMenu');
+                if (menu && menu.style.display !== 'none') {
+                    menu.style.display = 'none';
+                }
+                // Deselect active segment
                 if (selectedSegIdx !== null) {
                     deselectBtn.click();
                 }
