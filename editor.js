@@ -1052,6 +1052,17 @@
             opacity: 100
         };
         track.items.push(item);
+
+        if (videoDuration > 0) {
+            // Add a tiny microsecond offset so the playhead is definitively inside the item's time duration
+            const targetTime = Math.min(start + 0.001, videoDuration);
+            videoPlayer.currentTime = targetTime;
+            const displayPct = (targetTime / videoDuration) * 100;
+            timelinePlayhead.style.left = displayPct + '%';
+            progressFilled.style.width = displayPct + '%';
+            updateTimeDisplay();
+        }
+
         renderOverlayTracks();
         renderOverlayPreview(videoPlayer.currentTime);
         // Open editor immediately
@@ -1092,6 +1103,17 @@
                     track.items.push(item);
                     // Cache image element
                     overlayImageCache[id] = img;
+
+                    if (videoDuration > 0) {
+                        // Add a tiny microsecond offset so the playhead is definitively inside the item's time duration
+                        const targetTime = Math.min(start + 0.001, videoDuration);
+                        videoPlayer.currentTime = targetTime;
+                        const displayPct = (targetTime / videoDuration) * 100;
+                        timelinePlayhead.style.left = displayPct + '%';
+                        progressFilled.style.width = displayPct + '%';
+                        updateTimeDisplay();
+                    }
+
                     renderOverlayTracks();
                     renderOverlayPreview(videoPlayer.currentTime);
                     showToast('🖼️', 'Image overlay added');
