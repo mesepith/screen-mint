@@ -1299,6 +1299,22 @@ body::before {
   overflow: hidden;
 }
 
+.overlay-track-placeholder {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(255, 255, 255, 0.3);
+  font-size: 0.8rem;
+  pointer-events: none;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
 /* Overlay item block in the lane */
 .overlay-item {
   position: absolute;

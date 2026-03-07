@@ -1203,6 +1203,13 @@
             lane.appendChild(lanePH);
 
             // Render items
+            if (track.items.length === 0) {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'overlay-track-placeholder';
+                placeholder.textContent = 'Add Text and Image';
+                lane.appendChild(placeholder);
+            }
+
             track.items.forEach(item => {
                 const el = document.createElement('div');
                 el.className = 'overlay-item ' + (item.type === 'text' ? 'overlay-item-text' : 'overlay-item-image');
