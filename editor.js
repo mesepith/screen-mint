@@ -1052,6 +1052,17 @@
             opacity: 100
         };
         track.items.push(item);
+
+        if (videoDuration > 0) {
+            // Add a tiny microsecond offset so the playhead is definitively inside the item's time duration
+            const targetTime = Math.min(start + 0.001, videoDuration);
+            videoPlayer.currentTime = targetTime;
+            const displayPct = (targetTime / videoDuration) * 100;
+            timelinePlayhead.style.left = displayPct + '%';
+            progressFilled.style.width = displayPct + '%';
+            updateTimeDisplay();
+        }
+
         renderOverlayTracks();
         renderOverlayPreview(videoPlayer.currentTime);
         // Open editor immediately
@@ -1092,6 +1103,17 @@
                     track.items.push(item);
                     // Cache image element
                     overlayImageCache[id] = img;
+
+                    if (videoDuration > 0) {
+                        // Add a tiny microsecond offset so the playhead is definitively inside the item's time duration
+                        const targetTime = Math.min(start + 0.001, videoDuration);
+                        videoPlayer.currentTime = targetTime;
+                        const displayPct = (targetTime / videoDuration) * 100;
+                        timelinePlayhead.style.left = displayPct + '%';
+                        progressFilled.style.width = displayPct + '%';
+                        updateTimeDisplay();
+                    }
+
                     renderOverlayTracks();
                     renderOverlayPreview(videoPlayer.currentTime);
                     showToast('🖼️', 'Image overlay added');
@@ -1267,6 +1289,14 @@
                 const pct = Math.max(0, Math.min(1, (clickX - rect.left) / rect.width));
                 const clickTime = pct * videoDuration;
 
+                if (videoDuration > 0) {
+                    videoPlayer.currentTime = clickTime;
+                    const displayPct = (clickTime / videoDuration) * 100;
+                    timelinePlayhead.style.left = displayPct + '%';
+                    progressFilled.style.width = displayPct + '%';
+                    updateTimeDisplay();
+                }
+
                 // Position menu near the click
                 menu.style.left = clickX + 'px';
                 // Position just above the lane or adjust if near top
@@ -1363,12 +1393,37 @@
                     if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
                     e.preventDefault();
                     e.stopPropagation();
+
+                    if (videoDuration > 0) {
+                        const rect = lane.getBoundingClientRect();
+                        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                        const clickTime = pct * videoDuration;
+                        videoPlayer.currentTime = clickTime;
+                        const displayPct = (clickTime / videoDuration) * 100;
+                        timelinePlayhead.style.left = displayPct + '%';
+                        progressFilled.style.width = displayPct + '%';
+                        updateTimeDisplay();
+                    }
+
                     startOverlayDrag(e, track.id, item.id, lane);
                 });
 
                 el.addEventListener('touchstart', (e) => {
                     if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
                     e.stopPropagation();
+
+                    if (videoDuration > 0) {
+                        const rect = lane.getBoundingClientRect();
+                        const clientX = e.touches[0].clientX;
+                        const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                        const clickTime = pct * videoDuration;
+                        videoPlayer.currentTime = clickTime;
+                        const displayPct = (clickTime / videoDuration) * 100;
+                        timelinePlayhead.style.left = displayPct + '%';
+                        progressFilled.style.width = displayPct + '%';
+                        updateTimeDisplay();
+                    }
+
                     startOverlayDrag(e, track.id, item.id, lane);
                 }, { passive: false });
 
