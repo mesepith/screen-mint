@@ -767,8 +767,7 @@
                     reject(new Error('MediaRecorder error'));
                 };
 
-                // Start the single recording session
-                recorder.start(100);
+                // Recorder will start after the first segment is ready to play
 
                 // Begin with first segment
                 currentSegIndex = 0;
@@ -814,6 +813,13 @@
                 // start immediately — seeked event won't fire for no-op seeks
                 if (Math.abs(tempVideo.currentTime - targetTime) < 0.05) {
                     seeking = false;
+
+                    if (recorder && recorder.state === 'inactive') {
+                        recorder.start(100);
+                    } else if (recorder && recorder.state === 'paused') {
+                        recorder.resume();
+                    }
+
                     tempVideo.play().catch(() => {
                         advanceToNextSegment();
                     });
@@ -827,6 +833,13 @@
                     tempVideo.removeEventListener('seeked', onSeeked);
                     if (finished) return;
                     seeking = false;
+
+                    if (recorder && recorder.state === 'inactive') {
+                        recorder.start(100);
+                    } else if (recorder && recorder.state === 'paused') {
+                        recorder.resume();
+                    }
+
                     tempVideo.play().catch(() => {
                         // play() failed — advance anyway
                         advanceToNextSegment();
@@ -839,6 +852,12 @@
             function advanceToNextSegment() {
                 if (finished || seeking) return;
                 tempVideo.pause();
+
+                // Pause recorder while seeking to next segment to freeze the stream output
+                if (recorder && recorder.state === 'recording') {
+                    recorder.pause();
+                }
+
                 currentSegIndex++;
                 if (currentSegIndex >= segments.length) {
                     finishRecording();
