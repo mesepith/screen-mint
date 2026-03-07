@@ -976,7 +976,8 @@
         overlayTracks.push({
             id,
             name: `Track ${overlayTracks.length + 1}`,
-            items: []
+            items: [],
+            isNew: true
         });
         renderOverlayTracks();
         showToast('🎞️', `Added overlay track`);
@@ -1135,7 +1136,6 @@
     popoverClose.addEventListener('click', closeOverlayEditor);
     popoverSave.addEventListener('click', saveOverlayEditor);
 
-    // ── Render Overlay Tracks in DOM ──────────────────────────────
     function renderOverlayTracks() {
         overlayTracksContainer.innerHTML = '';
 
@@ -1146,6 +1146,12 @@
         overlayTracks.forEach((track, trackIdx) => {
             const row = document.createElement('div');
             row.className = 'overlay-track-row';
+
+            if (track.isNew) {
+                row.classList.add('animate-in');
+                track.isNew = false; // Only animate once
+            }
+
             row.dataset.trackId = track.id;
 
             // Sidebar
@@ -1180,7 +1186,9 @@
             delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
             delBtn.title = 'Delete track';
             delBtn.addEventListener('click', () => {
-                if (confirm(`Delete "${track.name}" and all its overlays?`)) {
+                if (track.items.length === 0) {
+                    removeTrack(track.id);
+                } else if (confirm(`Delete "${track.name}" and all its overlays?`)) {
                     removeTrack(track.id);
                 }
             });

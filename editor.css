@@ -1210,6 +1210,18 @@ body::before {
 }
 
 /* Individual track row */
+@keyframes slideInTrack {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .overlay-track-row {
   display: flex;
   flex-direction: column;
@@ -1219,6 +1231,10 @@ body::before {
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   transition: border-color var(--transition-fast);
+}
+
+.overlay-track-row.animate-in {
+  animation: slideInTrack 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .overlay-track-row:hover {
