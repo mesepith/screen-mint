@@ -1641,3 +1641,42 @@ body::before {
     height: 48px;
   }
 }
+
+/* ── Inline Track Menu ─────────────────────────────────────────── */
+.inline-track-menu {
+  position: absolute;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius-sm);
+  display: flex;
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+  padding: 4px;
+  gap: 4px;
+}
+
+.inline-track-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.inline-track-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.inline-track-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent-primary-hover);
+}

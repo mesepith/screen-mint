@@ -1003,10 +1003,10 @@
     addTrackBtn.addEventListener('click', addTrack);
 
     // ── Add Text Overlay ──────────────────────────────────────────
-    function addTextOverlay(trackId) {
+    function addTextOverlay(trackId, startTime = null) {
         const track = getTrack(trackId);
         if (!track) return;
-        const start = videoPlayer.currentTime || 0;
+        const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
         const item = {
             id: generateOverlayId(),
             type: 'text',
@@ -1027,7 +1027,7 @@
     }
 
     // ── Add Image Overlay ─────────────────────────────────────────
-    function addImageOverlay(trackId) {
+    function addImageOverlay(trackId, startTime = null) {
         const track = getTrack(trackId);
         if (!track) return;
         const input = document.createElement('input');
@@ -1041,10 +1041,11 @@
                 const img = new Image();
                 img.onload = () => {
                     const id = generateOverlayId();
+                    const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
                     const item = {
                         id,
                         type: 'image',
-                        start: videoPlayer.currentTime || 0,
+                        start: start,
                         duration: 5,
                         imageSrc: ev.target.result,
                         imageWidth: 20,  // percentage of video width
@@ -1218,6 +1219,48 @@
                 lane.appendChild(placeholder);
             }
 
+            // Clicking anywhere on an empty lane opens the inline menu at the click location
+            lane.addEventListener('click', (e) => {
+                if (track.items.length > 0) return; // Only trigger if track is empty
+
+                e.stopPropagation();
+                const menu = document.getElementById('inlineTrackMenu');
+                if (!menu) return;
+
+                const rect = lane.getBoundingClientRect();
+                const clickX = e.clientX;
+
+                // Calculate start time based on click X relative to lane width
+                const pct = Math.max(0, Math.min(1, (clickX - rect.left) / rect.width));
+                const clickTime = pct * videoDuration;
+
+                // Position menu near the click
+                menu.style.left = clickX + 'px';
+                // Position just above the lane or adjust if near top
+                menu.style.top = (rect.top + window.scrollY - menu.offsetHeight - 5) + 'px';
+                menu.style.display = 'flex';
+
+                // Update inline button listeners
+                const textBtn = document.getElementById('inlineTextBtn');
+                const imgBtn = document.getElementById('inlineImageBtn');
+
+                // Remove old listeners to avoid multiple triggers
+                const newTextBtn = textBtn.cloneNode(true);
+                const newImgBtn = imgBtn.cloneNode(true);
+                textBtn.parentNode.replaceChild(newTextBtn, textBtn);
+                imgBtn.parentNode.replaceChild(newImgBtn, imgBtn);
+
+                newTextBtn.addEventListener('click', () => {
+                    menu.style.display = 'none';
+                    addTextOverlay(track.id, clickTime);
+                });
+
+                newImgBtn.addEventListener('click', () => {
+                    menu.style.display = 'none';
+                    addImageOverlay(track.id, clickTime);
+                });
+            });
+
             track.items.forEach(item => {
                 const el = document.createElement('div');
                 el.className = 'overlay-item ' + (item.type === 'text' ? 'overlay-item-text' : 'overlay-item-image');
@@ -1369,6 +1412,17 @@
         }
         if (resizingOverlayItem) {
             resizingOverlayItem = null;
+        }
+    });
+
+    // Hide inline menu on outside click
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('inlineTrackMenu');
+        if (menu && menu.style.display !== 'none') {
+            // If click is not on the menu and not on a track placeholder
+            if (!menu.contains(e.target) && !e.target.classList.contains('overlay-track-placeholder') && !e.target.closest('.overlay-track-placeholder')) {
+                menu.style.display = 'none';
+            }
         }
     });
 
