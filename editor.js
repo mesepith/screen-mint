@@ -1363,12 +1363,37 @@
                     if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
                     e.preventDefault();
                     e.stopPropagation();
+
+                    if (videoDuration > 0) {
+                        const rect = lane.getBoundingClientRect();
+                        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                        const clickTime = pct * videoDuration;
+                        videoPlayer.currentTime = clickTime;
+                        const displayPct = (clickTime / videoDuration) * 100;
+                        timelinePlayhead.style.left = displayPct + '%';
+                        progressFilled.style.width = displayPct + '%';
+                        updateTimeDisplay();
+                    }
+
                     startOverlayDrag(e, track.id, item.id, lane);
                 });
 
                 el.addEventListener('touchstart', (e) => {
                     if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
                     e.stopPropagation();
+
+                    if (videoDuration > 0) {
+                        const rect = lane.getBoundingClientRect();
+                        const clientX = e.touches[0].clientX;
+                        const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                        const clickTime = pct * videoDuration;
+                        videoPlayer.currentTime = clickTime;
+                        const displayPct = (clickTime / videoDuration) * 100;
+                        timelinePlayhead.style.left = displayPct + '%';
+                        progressFilled.style.width = displayPct + '%';
+                        updateTimeDisplay();
+                    }
+
                     startOverlayDrag(e, track.id, item.id, lane);
                 }, { passive: false });
 
