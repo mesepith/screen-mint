@@ -1267,6 +1267,14 @@
                 const pct = Math.max(0, Math.min(1, (clickX - rect.left) / rect.width));
                 const clickTime = pct * videoDuration;
 
+                if (videoDuration > 0) {
+                    videoPlayer.currentTime = clickTime;
+                    const displayPct = (clickTime / videoDuration) * 100;
+                    timelinePlayhead.style.left = displayPct + '%';
+                    progressFilled.style.width = displayPct + '%';
+                    updateTimeDisplay();
+                }
+
                 // Position menu near the click
                 menu.style.left = clickX + 'px';
                 // Position just above the lane or adjust if near top
