@@ -1210,6 +1210,18 @@ body::before {
 }
 
 /* Individual track row */
+@keyframes slideInTrack {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .overlay-track-row {
   display: flex;
   flex-direction: column;
@@ -1219,6 +1231,10 @@ body::before {
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   transition: border-color var(--transition-fast);
+}
+
+.overlay-track-row.animate-in {
+  animation: slideInTrack 1.0s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .overlay-track-row:hover {
@@ -1297,6 +1313,23 @@ body::before {
   border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: 4px;
   overflow: hidden;
+}
+
+.overlay-track-placeholder {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #ffffff;
+  background: var(--accent-primary, #6366f1);
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  font-size: 0.8rem;
+  pointer-events: none;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 /* Overlay item block in the lane */
@@ -1608,4 +1641,43 @@ body::before {
   .overlay-track-lane {
     height: 48px;
   }
+}
+
+/* ── Inline Track Menu ─────────────────────────────────────────── */
+.inline-track-menu {
+  position: absolute;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius-sm);
+  display: flex;
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+  padding: 4px;
+  gap: 4px;
+}
+
+.inline-track-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.inline-track-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.inline-track-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent-primary-hover);
 }

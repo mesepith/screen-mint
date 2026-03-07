@@ -157,6 +157,13 @@
 
         removedFlags = [false]; // one segment initially (the whole video)
 
+        // Set wrapper aspect ratio to match video to ensure overlay coordinates match the export precisely
+        const wrapper = videoPlayer.parentElement;
+        if (wrapper && videoPlayer.videoWidth && videoPlayer.videoHeight) {
+            wrapper.style.aspectRatio = `${videoPlayer.videoWidth} / ${videoPlayer.videoHeight}`;
+            resizeOverlayCanvas();
+        }
+
         updateTimeDisplay();
         drawWaveform();
         updateTimelineLabels();
@@ -760,8 +767,7 @@
                     reject(new Error('MediaRecorder error'));
                 };
 
-                // Start the single recording session
-                recorder.start(100);
+                // Recorder will start after the first segment is ready to play
 
                 // Begin with first segment
                 currentSegIndex = 0;
@@ -807,6 +813,13 @@
                 // start immediately — seeked event won't fire for no-op seeks
                 if (Math.abs(tempVideo.currentTime - targetTime) < 0.05) {
                     seeking = false;
+
+                    if (recorder && recorder.state === 'inactive') {
+                        recorder.start(100);
+                    } else if (recorder && recorder.state === 'paused') {
+                        recorder.resume();
+                    }
+
                     tempVideo.play().catch(() => {
                         advanceToNextSegment();
                     });
@@ -820,6 +833,13 @@
                     tempVideo.removeEventListener('seeked', onSeeked);
                     if (finished) return;
                     seeking = false;
+
+                    if (recorder && recorder.state === 'inactive') {
+                        recorder.start(100);
+                    } else if (recorder && recorder.state === 'paused') {
+                        recorder.resume();
+                    }
+
                     tempVideo.play().catch(() => {
                         // play() failed — advance anyway
                         advanceToNextSegment();
@@ -832,6 +852,12 @@
             function advanceToNextSegment() {
                 if (finished || seeking) return;
                 tempVideo.pause();
+
+                // Pause recorder while seeking to next segment to freeze the stream output
+                if (recorder && recorder.state === 'recording') {
+                    recorder.pause();
+                }
+
                 currentSegIndex++;
                 if (currentSegIndex >= segments.length) {
                     finishRecording();
@@ -956,6 +982,12 @@
     function resizeOverlayCanvas() {
         const wrapper = videoPlayer.parentElement;
         if (!wrapper) return;
+
+        // Ensure wrapper aspect ratio perfectly strictly matches the video source 
+        if (videoPlayer.videoWidth && videoPlayer.videoHeight) {
+            wrapper.style.aspectRatio = `${videoPlayer.videoWidth} / ${videoPlayer.videoHeight}`;
+        }
+
         overlayCanvas.width = wrapper.clientWidth * window.devicePixelRatio;
         overlayCanvas.height = wrapper.clientHeight * window.devicePixelRatio;
         overlayCanvas.style.width = wrapper.clientWidth + 'px';
@@ -976,7 +1008,8 @@
         overlayTracks.push({
             id,
             name: `Track ${overlayTracks.length + 1}`,
-            items: []
+            items: [],
+            isNew: true
         });
         renderOverlayTracks();
         showToast('🎞️', `Added overlay track`);
@@ -1002,10 +1035,10 @@
     addTrackBtn.addEventListener('click', addTrack);
 
     // ── Add Text Overlay ──────────────────────────────────────────
-    function addTextOverlay(trackId) {
+    function addTextOverlay(trackId, startTime = null) {
         const track = getTrack(trackId);
         if (!track) return;
-        const start = videoPlayer.currentTime || 0;
+        const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
         const item = {
             id: generateOverlayId(),
             type: 'text',
@@ -1026,7 +1059,7 @@
     }
 
     // ── Add Image Overlay ─────────────────────────────────────────
-    function addImageOverlay(trackId) {
+    function addImageOverlay(trackId, startTime = null) {
         const track = getTrack(trackId);
         if (!track) return;
         const input = document.createElement('input');
@@ -1040,10 +1073,11 @@
                 const img = new Image();
                 img.onload = () => {
                     const id = generateOverlayId();
+                    const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
                     const item = {
                         id,
                         type: 'image',
-                        start: videoPlayer.currentTime || 0,
+                        start: start,
                         duration: 5,
                         imageSrc: ev.target.result,
                         imageWidth: 20,  // percentage of video width
@@ -1052,8 +1086,9 @@
                         y: 50,
                         opacity: 100
                     };
-                    // Calculate aspect ratio
-                    item.imageHeight = (img.naturalHeight / img.naturalWidth) * item.imageWidth;
+                    // Calculate aspect ratio accounting for the video's aspect ratio
+                    const videoAspect = (videoPlayer.videoWidth && videoPlayer.videoHeight) ? (videoPlayer.videoWidth / videoPlayer.videoHeight) : (16 / 9);
+                    item.imageHeight = (img.naturalHeight / img.naturalWidth) * item.imageWidth * videoAspect;
                     track.items.push(item);
                     // Cache image element
                     overlayImageCache[id] = img;
@@ -1135,7 +1170,6 @@
     popoverClose.addEventListener('click', closeOverlayEditor);
     popoverSave.addEventListener('click', saveOverlayEditor);
 
-    // ── Render Overlay Tracks in DOM ──────────────────────────────
     function renderOverlayTracks() {
         overlayTracksContainer.innerHTML = '';
 
@@ -1146,6 +1180,12 @@
         overlayTracks.forEach((track, trackIdx) => {
             const row = document.createElement('div');
             row.className = 'overlay-track-row';
+
+            if (track.isNew) {
+                row.classList.add('animate-in');
+                track.isNew = false; // Only animate once
+            }
+
             row.dataset.trackId = track.id;
 
             // Sidebar
@@ -1180,7 +1220,9 @@
             delBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
             delBtn.title = 'Delete track';
             delBtn.addEventListener('click', () => {
-                if (confirm(`Delete "${track.name}" and all its overlays?`)) {
+                if (track.items.length === 0) {
+                    removeTrack(track.id);
+                } else if (confirm(`Delete "${track.name}" and all its overlays?`)) {
                     removeTrack(track.id);
                 }
             });
@@ -1203,6 +1245,55 @@
             lane.appendChild(lanePH);
 
             // Render items
+            if (track.items.length === 0) {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'overlay-track-placeholder';
+                placeholder.textContent = 'Add Text and Image';
+                lane.appendChild(placeholder);
+            }
+
+            // Clicking anywhere on an empty lane opens the inline menu at the click location
+            lane.addEventListener('click', (e) => {
+                if (e.target.closest('.overlay-item')) return; // Ignore clicks if they fall on existing overlay items
+
+                e.stopPropagation();
+                const menu = document.getElementById('inlineTrackMenu');
+                if (!menu) return;
+
+                const rect = lane.getBoundingClientRect();
+                const clickX = e.clientX;
+
+                // Calculate start time based on click X relative to lane width
+                const pct = Math.max(0, Math.min(1, (clickX - rect.left) / rect.width));
+                const clickTime = pct * videoDuration;
+
+                // Position menu near the click
+                menu.style.left = clickX + 'px';
+                // Position just above the lane or adjust if near top
+                menu.style.top = (rect.top + window.scrollY - menu.offsetHeight - 5) + 'px';
+                menu.style.display = 'flex';
+
+                // Update inline button listeners
+                const textBtn = document.getElementById('inlineTextBtn');
+                const imgBtn = document.getElementById('inlineImageBtn');
+
+                // Remove old listeners to avoid multiple triggers
+                const newTextBtn = textBtn.cloneNode(true);
+                const newImgBtn = imgBtn.cloneNode(true);
+                textBtn.parentNode.replaceChild(newTextBtn, textBtn);
+                imgBtn.parentNode.replaceChild(newImgBtn, imgBtn);
+
+                newTextBtn.addEventListener('click', () => {
+                    menu.style.display = 'none';
+                    addTextOverlay(track.id, clickTime);
+                });
+
+                newImgBtn.addEventListener('click', () => {
+                    menu.style.display = 'none';
+                    addImageOverlay(track.id, clickTime);
+                });
+            });
+
             track.items.forEach(item => {
                 const el = document.createElement('div');
                 el.className = 'overlay-item ' + (item.type === 'text' ? 'overlay-item-text' : 'overlay-item-image');
@@ -1354,6 +1445,23 @@
         }
         if (resizingOverlayItem) {
             resizingOverlayItem = null;
+        }
+    });
+
+    // Hide inline menu on outside click
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('inlineTrackMenu');
+        if (menu && menu.style.display !== 'none') {
+            // Ignore clicks directly inside the menu itself
+            if (menu.contains(e.target)) return;
+
+            // Ignore clicks on track lanes since they are the ones opening the menu
+            const clickedLane = e.target.closest('.overlay-track-lane');
+            if (clickedLane) {
+                return;
+            }
+
+            menu.style.display = 'none';
         }
     });
 
@@ -1823,7 +1931,12 @@
                 }
                 break;
             case 'Escape':
-                // Deselect
+                // Hide inline track menu if open
+                const menu = document.getElementById('inlineTrackMenu');
+                if (menu && menu.style.display !== 'none') {
+                    menu.style.display = 'none';
+                }
+                // Deselect active segment
                 if (selectedSegIdx !== null) {
                     deselectBtn.click();
                 }
