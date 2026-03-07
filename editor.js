@@ -157,6 +157,13 @@
 
         removedFlags = [false]; // one segment initially (the whole video)
 
+        // Set wrapper aspect ratio to match video to ensure overlay coordinates match the export precisely
+        const wrapper = videoPlayer.parentElement;
+        if (wrapper && videoPlayer.videoWidth && videoPlayer.videoHeight) {
+            wrapper.style.aspectRatio = `${videoPlayer.videoWidth} / ${videoPlayer.videoHeight}`;
+            resizeOverlayCanvas();
+        }
+
         updateTimeDisplay();
         drawWaveform();
         updateTimelineLabels();
@@ -956,6 +963,12 @@
     function resizeOverlayCanvas() {
         const wrapper = videoPlayer.parentElement;
         if (!wrapper) return;
+
+        // Ensure wrapper aspect ratio perfectly strictly matches the video source 
+        if (videoPlayer.videoWidth && videoPlayer.videoHeight) {
+            wrapper.style.aspectRatio = `${videoPlayer.videoWidth} / ${videoPlayer.videoHeight}`;
+        }
+
         overlayCanvas.width = wrapper.clientWidth * window.devicePixelRatio;
         overlayCanvas.height = wrapper.clientHeight * window.devicePixelRatio;
         overlayCanvas.style.width = wrapper.clientWidth + 'px';
@@ -1054,8 +1067,9 @@
                         y: 50,
                         opacity: 100
                     };
-                    // Calculate aspect ratio
-                    item.imageHeight = (img.naturalHeight / img.naturalWidth) * item.imageWidth;
+                    // Calculate aspect ratio accounting for the video's aspect ratio
+                    const videoAspect = (videoPlayer.videoWidth && videoPlayer.videoHeight) ? (videoPlayer.videoWidth / videoPlayer.videoHeight) : (16 / 9);
+                    item.imageHeight = (img.naturalHeight / img.naturalWidth) * item.imageWidth * videoAspect;
                     track.items.push(item);
                     // Cache image element
                     overlayImageCache[id] = img;
