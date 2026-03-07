@@ -1221,7 +1221,7 @@
 
             // Clicking anywhere on an empty lane opens the inline menu at the click location
             lane.addEventListener('click', (e) => {
-                if (track.items.length > 0) return; // Only trigger if track is empty
+                if (e.target.closest('.overlay-item')) return; // Ignore clicks if they fall on existing overlay items
 
                 e.stopPropagation();
                 const menu = document.getElementById('inlineTrackMenu');
@@ -1419,10 +1419,16 @@
     document.addEventListener('click', (e) => {
         const menu = document.getElementById('inlineTrackMenu');
         if (menu && menu.style.display !== 'none') {
-            // If click is not on the menu and not on a track placeholder
-            if (!menu.contains(e.target) && !e.target.classList.contains('overlay-track-placeholder') && !e.target.closest('.overlay-track-placeholder')) {
-                menu.style.display = 'none';
+            // Ignore clicks directly inside the menu itself
+            if (menu.contains(e.target)) return;
+
+            // Ignore clicks on track lanes since they are the ones opening the menu
+            const clickedLane = e.target.closest('.overlay-track-lane');
+            if (clickedLane) {
+                return;
             }
+
+            menu.style.display = 'none';
         }
     });
 
