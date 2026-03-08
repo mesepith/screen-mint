@@ -462,12 +462,44 @@ body::before {
    ═══════════════════════════════════════════════════════════════ */
 
 .editor-section {
+  background: transparent;
+  padding: 0px 22px 24px 22px;
+  margin-bottom: 24px;
+}
+
+.timeline-scroll-wrapper {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  padding: 0px 20px 24px;
+  overflow-x: auto;
+  overflow-y: hidden;
   margin-bottom: 24px;
+  position: relative;
+  /* Scrollbar styling */
+  scrollbar-color: var(--text-secondary) transparent;
+  scrollbar-width: thin;
+}
+
+.timeline-scroll-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.timeline-scroll-wrapper::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.timeline-scroll-wrapper::-webkit-scrollbar-thumb {
+  background: var(--text-secondary);
+  border-radius: 4px;
+}
+
+.timeline-scroll-content {
+  min-width: 100%;
+  padding: 0px 20px;
+  position: relative;
+  transition: width var(--transition-normal);
 }
 
 .editor-header {
@@ -718,6 +750,7 @@ body::before {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  padding: 16px 20px 0;
 }
 
 .editor-controls-spacer {
@@ -1159,7 +1192,7 @@ body::before {
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0;
-  padding: 10px 20px 0px;
+  padding: 10px 10px 0px;
   margin-bottom: 0px;
 }
 
@@ -1248,6 +1281,9 @@ body::before {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  width: 140px;
+  /* Fixed width to guarantee main timeline layout alignment */
+  justify-content: space-between;
 }
 
 .overlay-track-label {

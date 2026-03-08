@@ -142,28 +142,30 @@
     </div>
 
     <!-- Overlay Tracks Section -->
-    <div class="overlay-tracks-section" id="overlayTracksSection">
+    <div class="timeline-scroll-wrapper" id="timelineScrollWrapper">
+        <div class="timeline-scroll-content" id="timelineScrollContent">
+            <div class="overlay-tracks-section" id="overlayTracksSection">
+                <div class="overlay-tracks-container" id="overlayTracksContainer">
+                    <!-- Track rows will be rendered here by JS -->
+                </div>
+            </div>
 
-        <div class="overlay-tracks-container" id="overlayTracksContainer">
-            <!-- Track rows will be rendered here by JS -->
-        </div>
-    </div>
+            <!-- Editor Section -->
+            <div class="editor-section" id="editorSection">
+                <!-- Unified Timeline -->
+                <div class="timeline" id="timeline">
+                    <canvas class="timeline-waveform" id="timelineWaveform"></canvas>
+                    <div class="timeline-segments-layer" id="timelineSegmentsLayer"></div>
+                    <div class="timeline-splits-layer" id="timelineSplitsLayer"></div>
+                    <div class="timeline-playhead" id="timelinePlayhead"></div>
+                </div>
 
-    <!-- Editor Section -->
-    <div class="editor-section" id="editorSection">
-
-        <!-- Unified Timeline -->
-        <div class="timeline" id="timeline">
-            <canvas class="timeline-waveform" id="timelineWaveform"></canvas>
-            <div class="timeline-segments-layer" id="timelineSegmentsLayer"></div>
-            <div class="timeline-splits-layer" id="timelineSplitsLayer"></div>
-            <div class="timeline-playhead" id="timelinePlayhead"></div>
-        </div>
-
-        <!-- Time labels -->
-        <div class="timeline-labels">
-            <span class="timeline-label-time" id="timelineLabelStart">0:00.0</span>
-            <span class="timeline-label-time" id="timelineLabelEnd">0:00.0</span>
+                <!-- Time labels -->
+                <div class="timeline-labels">
+                    <span class="timeline-label-time" id="timelineLabelStart">0:00.0</span>
+                    <span class="timeline-label-time" id="timelineLabelEnd">0:00.0</span>
+                </div>
+            </div>
         </div>
 
         <!-- Editor Controls -->
