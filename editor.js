@@ -1066,7 +1066,7 @@
         renderOverlayTracks();
         renderOverlayPreview(videoPlayer.currentTime);
         // Open editor immediately
-        openOverlayEditor(trackId, item.id);
+        openOverlayEditor(trackId, item.id, true);
     }
 
     // ── Add Image Overlay ─────────────────────────────────────────
@@ -1138,11 +1138,11 @@
     // ── Overlay Editor Popover ────────────────────────────────────
     let popoverBackdrop = null;
 
-    function openOverlayEditor(trackId, itemId) {
+    function openOverlayEditor(trackId, itemId, isNew = false) {
         const item = getOverlayItem(trackId, itemId);
         if (!item || item.type !== 'text') return;
 
-        editingOverlay = { trackId, itemId };
+        editingOverlay = { trackId, itemId, isNew };
         popoverText.value = item.content;
         popoverFontSize.value = item.fontSize;
         popoverColor.value = item.color;
@@ -1162,7 +1162,11 @@
         popoverText.focus();
     }
 
-    function closeOverlayEditor() {
+    function closeOverlayEditor(eOrCancel) {
+        const isCancel = (eOrCancel instanceof Event) || (eOrCancel === true) || (eOrCancel === undefined);
+        if (isCancel && editingOverlay && editingOverlay.isNew) {
+            removeOverlayItem(editingOverlay.trackId, editingOverlay.itemId);
+        }
         overlayEditPopover.style.display = 'none';
         editingOverlay = null;
         if (popoverBackdrop) {
@@ -1174,7 +1178,7 @@
     function saveOverlayEditor() {
         if (!editingOverlay) return;
         const item = getOverlayItem(editingOverlay.trackId, editingOverlay.itemId);
-        if (!item) { closeOverlayEditor(); return; }
+        if (!item) { closeOverlayEditor(true); return; }
 
         item.content = popoverText.value || 'Text';
         item.fontSize = parseInt(popoverFontSize.value) || 32;
@@ -1183,7 +1187,7 @@
         item.x = parseFloat(popoverX.value) || 50;
         item.y = parseFloat(popoverY.value) || 50;
 
-        closeOverlayEditor();
+        closeOverlayEditor(false);
         renderOverlayTracks();
         renderOverlayPreview(videoPlayer.currentTime);
         showToast('✅', 'Overlay updated');

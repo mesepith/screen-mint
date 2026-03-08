@@ -1646,38 +1646,40 @@ body::before {
 /* ── Inline Track Menu ─────────────────────────────────────────── */
 .inline-track-menu {
   position: absolute;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-active);
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: var(--radius-sm);
   display: flex;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
   z-index: 50;
-  padding: 4px;
-  gap: 4px;
+  padding: 6px;
+  gap: 8px;
 }
 
 .inline-track-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 8px 14px;
   border: none;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 0.75rem;
-  font-weight: 500;
+  background: #ffffff;
+  color: #12121a;
+  font-size: 0.8rem;
+  font-weight: 700;
   border-radius: 4px;
   cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+  box-shadow: var(--shadow-sm);
 }
 
 .inline-track-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   fill: currentColor;
 }
 
 .inline-track-btn:hover {
-  background: rgba(99, 102, 241, 0.15);
-  color: var(--accent-primary-hover);
+  background: #f0f0f5;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
