@@ -70,6 +70,8 @@
     // ── State ──────────────────────────────────────────────────────
     let videoBlob = null;
     let videoDuration = 0;
+    let timelineDuration = 0; // The virtual length of the timeline
+    let currentAppTime = 0;   // The virtual playhead time
     let videoFileName = '';
 
     // Split & delete state
@@ -155,6 +157,9 @@
         videoDuration = videoPlayer.duration;
         if (!isFinite(videoDuration) || videoDuration <= 0) videoDuration = 0;
 
+        timelineDuration = videoDuration;
+        currentAppTime = 0;
+
         removedFlags = [false]; // one segment initially (the whole video)
 
         // Set wrapper aspect ratio to match video to ensure overlay coordinates match the export precisely
@@ -164,6 +169,7 @@
             resizeOverlayCanvas();
         }
 
+        updateTimelineDuration();
         updateTimeDisplay();
         drawWaveform();
         updateTimelineLabels();
@@ -178,12 +184,62 @@
     playOverlay.addEventListener('click', togglePlay);
     playPauseBtn.addEventListener('click', togglePlay);
 
+    let isAppPlaying = false;
+
     function togglePlay() {
-        if (videoPlayer.paused || videoPlayer.ended) {
-            videoPlayer.play();
-        } else {
+        if (isAppPlaying) {
+            isAppPlaying = false;
             videoPlayer.pause();
+            stopVirtualPlayback();
+            playIcon.style.display = 'block';
+            pauseIcon.style.display = 'none';
+            playOverlay.classList.remove('hidden');
+        } else {
+            isAppPlaying = true;
+            if (currentAppTime >= timelineDuration) {
+                currentAppTime = 0;
+                videoPlayer.currentTime = 0;
+            }
+            if (currentAppTime < videoDuration) {
+                stopVirtualPlayback();
+                videoPlayer.play();
+                playIcon.style.display = 'none';
+                pauseIcon.style.display = 'block';
+                playOverlay.classList.add('hidden');
+                videoToolbar.classList.add('hidden');
+            } else {
+                videoPlayer.pause();
+                startVirtualPlayback();
+                playIcon.style.display = 'none';
+                pauseIcon.style.display = 'block';
+                playOverlay.classList.add('hidden');
+                videoToolbar.classList.add('hidden');
+            }
         }
+    }
+
+    function seekTo(targetTime) {
+        currentAppTime = targetTime;
+
+        if (currentAppTime < videoDuration) {
+            videoPlayer.currentTime = currentAppTime;
+            if (isAppPlaying) {
+                videoPlayer.play();
+                stopVirtualPlayback();
+            } else {
+                videoPlayer.pause();
+                stopVirtualPlayback();
+            }
+        } else {
+            videoPlayer.currentTime = videoDuration;
+            videoPlayer.pause();
+            if (isAppPlaying) {
+                startVirtualPlayback();
+            } else {
+                stopVirtualPlayback();
+            }
+        }
+        updateVirtualPlayhead();
     }
 
     videoPlayer.addEventListener('play', () => {
@@ -194,27 +250,112 @@
     });
 
     videoPlayer.addEventListener('pause', () => {
-        playIcon.style.display = 'block';
-        pauseIcon.style.display = 'none';
-        playOverlay.classList.remove('hidden');
+        if (!isVirtualPlaying && !isAppPlaying) {
+            playIcon.style.display = 'block';
+            pauseIcon.style.display = 'none';
+            playOverlay.classList.remove('hidden');
+        }
     });
 
     videoPlayer.addEventListener('ended', () => {
-        playIcon.style.display = 'block';
-        pauseIcon.style.display = 'none';
-        playOverlay.classList.remove('hidden');
+        if (timelineDuration > videoDuration) {
+            if (isAppPlaying) {
+                startVirtualPlayback();
+            }
+        } else {
+            isAppPlaying = false;
+            playIcon.style.display = 'block';
+            pauseIcon.style.display = 'none';
+            playOverlay.classList.remove('hidden');
+        }
     });
 
     stopBtn.addEventListener('click', () => {
+        isAppPlaying = false;
         videoPlayer.pause();
+        stopVirtualPlayback();
+        currentAppTime = 0;
         videoPlayer.currentTime = 0;
+        updateVirtualPlayhead();
     });
+
+    // ── Virtual Playback ──────────────────────────────────────────
+    let isVirtualPlaying = false;
+    let virtualPlayInterval = null;
+    let lastRenderTime = 0;
+
+    function startVirtualPlayback() {
+        if (isVirtualPlaying) return;
+        isVirtualPlaying = true;
+        lastRenderTime = performance.now();
+        virtualPlayInterval = requestAnimationFrame(virtualPlayLoop);
+    }
+
+    function stopVirtualPlayback() {
+        isVirtualPlaying = false;
+        if (virtualPlayInterval) cancelAnimationFrame(virtualPlayInterval);
+
+        playIcon.style.display = 'block';
+        pauseIcon.style.display = 'none';
+        if (videoPlayer.paused) {
+            playOverlay.classList.remove('hidden');
+        }
+    }
+
+    function virtualPlayLoop(time) {
+        if (!isVirtualPlaying) return;
+        const deltaSec = (time - lastRenderTime) / 1000;
+        lastRenderTime = time;
+
+        currentAppTime += deltaSec;
+
+        if (currentAppTime >= timelineDuration) {
+            currentAppTime = timelineDuration;
+            isAppPlaying = false;
+            stopVirtualPlayback();
+            playIcon.style.display = 'block';
+            pauseIcon.style.display = 'none';
+            playOverlay.classList.remove('hidden');
+        }
+
+        updateVirtualPlayhead();
+
+        if (isVirtualPlaying) {
+            virtualPlayInterval = requestAnimationFrame(virtualPlayLoop);
+        }
+    }
+
+    function updateVirtualPlayhead() {
+        if (timelineDuration > 0) {
+            const pct = (currentAppTime / timelineDuration) * 100;
+            progressFilled.style.width = pct + '%';
+            timelinePlayhead.style.left = pct + '%';
+
+            if (currentAppTime > videoDuration) {
+                videoPlayer.style.opacity = '0';
+            } else {
+                videoPlayer.style.opacity = '1';
+            }
+
+            // Render overlay preview & update lane playheads
+            renderOverlayPreview(currentAppTime);
+            updateLanePlayheads(pct);
+        }
+        updateTimeDisplay();
+    }
+
 
     // ── Progress & Playhead ───────────────────────────────────────
     videoPlayer.addEventListener('timeupdate', () => {
+        if (isVirtualPlaying || isDraggingPlayhead) return; // Prevent conflicts
+
+        // When paused and playhead is in the extended region, ignore native timeupdate events 
+        // to prevent snapping the extended currentAppTime back to videoDuration limit.
+        if (!isAppPlaying && currentAppTime >= videoDuration) return;
+
         if (videoDuration > 0) {
-            const ct = videoPlayer.currentTime;
-            const pct = (ct / videoDuration) * 100;
+            currentAppTime = videoPlayer.currentTime;
+            const pct = (currentAppTime / timelineDuration) * 100;
             progressFilled.style.width = pct + '%';
             timelinePlayhead.style.left = pct + '%';
 
@@ -222,15 +363,16 @@
             if (!videoPlayer.paused) {
                 const segments = getSegments();
                 for (const seg of segments) {
-                    if (seg.removed && ct >= seg.start && ct < seg.end - 0.05) {
+                    if (seg.removed && currentAppTime >= seg.start && currentAppTime < seg.end - 0.05) {
                         videoPlayer.currentTime = seg.end;
+                        currentAppTime = seg.end;
                         return;
                     }
                 }
             }
 
             // Render overlay preview & update lane playheads
-            renderOverlayPreview(ct);
+            renderOverlayPreview(currentAppTime);
             updateLanePlayheads(pct);
         }
         updateTimeDisplay();
@@ -250,7 +392,9 @@
     progressContainer.addEventListener('click', (e) => {
         const rect = progressContainer.getBoundingClientRect();
         const pct = (e.clientX - rect.left) / rect.width;
-        videoPlayer.currentTime = snapToKept(pct * videoDuration);
+
+        const targetTime = snapToKept(pct * timelineDuration);
+        seekTo(targetTime);
     });
 
     // ── Playhead Drag (scrub on timeline) ─────────────────────────
@@ -258,14 +402,19 @@
         const rect = timeline.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        return pct * videoDuration;
+        return pct * timelineDuration;
     }
+
+    let wasPlayingBeforeDrag = false;
 
     timelinePlayhead.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         isDraggingPlayhead = true;
+        wasPlayingBeforeDrag = isAppPlaying;
+        isAppPlaying = false;
         videoPlayer.pause();
+        stopVirtualPlayback();
         document.body.style.cursor = 'grabbing';
         document.body.style.userSelect = 'none';
     });
@@ -273,27 +422,20 @@
     timelinePlayhead.addEventListener('touchstart', (e) => {
         e.stopPropagation();
         isDraggingPlayhead = true;
+        wasPlayingBeforeDrag = isAppPlaying;
+        isAppPlaying = false;
         videoPlayer.pause();
+        stopVirtualPlayback();
     }, { passive: true });
 
     document.addEventListener('mousemove', (e) => {
         if (!isDraggingPlayhead) return;
-        const time = getTimeFromPointer(e);
-        videoPlayer.currentTime = time;
-        const pct = (time / videoDuration) * 100;
-        timelinePlayhead.style.left = pct + '%';
-        progressFilled.style.width = pct + '%';
-        updateTimeDisplay();
+        seekTo(getTimeFromPointer(e));
     });
 
     document.addEventListener('touchmove', (e) => {
         if (!isDraggingPlayhead) return;
-        const time = getTimeFromPointer(e);
-        videoPlayer.currentTime = time;
-        const pct = (time / videoDuration) * 100;
-        timelinePlayhead.style.left = pct + '%';
-        progressFilled.style.width = pct + '%';
-        updateTimeDisplay();
+        seekTo(getTimeFromPointer(e));
     }, { passive: true });
 
     document.addEventListener('mouseup', () => {
@@ -302,12 +444,18 @@
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         videoToolbar.classList.remove('hidden');
+        if (wasPlayingBeforeDrag) {
+            togglePlay();
+        }
     });
 
     document.addEventListener('touchend', () => {
         if (!isDraggingPlayhead) return;
         isDraggingPlayhead = false;
         videoToolbar.classList.remove('hidden');
+        if (wasPlayingBeforeDrag) {
+            togglePlay();
+        }
     });
 
     // ── Click anywhere on timeline to move playhead ───────────────
@@ -315,12 +463,8 @@
         if (isDraggingPlayhead) return;
         const rect = timeline.getBoundingClientRect();
         const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        const time = snapToKept(pct * videoDuration);
-        videoPlayer.currentTime = time;
-        const displayPct = (time / videoDuration) * 100;
-        timelinePlayhead.style.left = displayPct + '%';
-        progressFilled.style.width = displayPct + '%';
-        updateTimeDisplay();
+
+        seekTo(snapToKept(pct * timelineDuration));
         videoToolbar.classList.remove('hidden');
     });
 
@@ -369,14 +513,18 @@
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
         const w = rect.width, h = rect.height;
-        const barCount = Math.floor(w / 4);
+        const videoW = timelineDuration > 0 ? w * (videoDuration / timelineDuration) : w;
+
+        const barCount = Math.floor(videoW / 4);
         const barWidth = 2;
-        const gap = (w - barCount * barWidth) / (barCount - 1);
+        const gap = barCount > 1 ? (videoW - barCount * barWidth) / (barCount - 1) : 0;
 
         ctx.clearRect(0, 0, w, h);
 
         for (let i = 0; i < barCount; i++) {
             const x = i * (barWidth + gap);
+            if (x + barWidth > videoW) break; // Do not draw waves past the end of the video timeline segment
+
             const noise1 = Math.sin(i * 0.15) * 0.3;
             const noise2 = Math.sin(i * 0.4 + 1.5) * 0.2;
             const noise3 = Math.cos(i * 0.08) * 0.25;
@@ -404,7 +552,38 @@
 
     function updateTimelineLabels() {
         timelineLabelStart.textContent = formatTimePrecise(0);
-        timelineLabelEnd.textContent = formatTimePrecise(videoDuration);
+        timelineLabelEnd.textContent = formatTimePrecise(timelineDuration);
+    }
+
+    function updateTimelineDuration() {
+        // Calculate max end time of all overlays
+        let maxOverlayEnd = 0;
+        for (const track of overlayTracks) {
+            for (const item of track.items) {
+                const end = item.start + item.duration;
+                if (end > maxOverlayEnd) maxOverlayEnd = end;
+            }
+        }
+
+        // Target duration is either video duration or furthest overlay
+        const targetDuration = Math.max(videoDuration, maxOverlayEnd);
+
+        if (Math.abs(timelineDuration - targetDuration) > 0.05) {
+            timelineDuration = targetDuration;
+
+            // Adjust scroll wrapper content size
+            const scrollContent = document.getElementById('timelineScrollContent');
+            if (scrollContent) {
+                // Width is proportional to how much longer timeline is than video
+                const widthPct = videoDuration > 0 ? (timelineDuration / videoDuration) * 100 : 100;
+                scrollContent.style.width = Math.max(100, widthPct) + '%';
+            }
+
+            updateTimelineLabels();
+            drawWaveform();
+            renderTimeline();
+            renderOverlayTracks();
+        }
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -550,10 +729,12 @@
     function renderSegments() {
         timelineSegmentsLayer.innerHTML = '';
         const segments = getSegments();
+        // Since getSegments returns segments based on videoDuration, 
+        // we must scale them back relative to timelineDuration for correct rendering
 
         segments.forEach((seg, idx) => {
-            const leftPct = (seg.start / videoDuration) * 100;
-            const widthPct = ((seg.end - seg.start) / videoDuration) * 100;
+            const leftPct = (seg.start / timelineDuration) * 100;
+            const widthPct = ((seg.end - seg.start) / timelineDuration) * 100;
 
             const el = document.createElement('div');
             el.className = 'segment-overlay';
@@ -584,12 +765,8 @@
                 // Always move playhead to clicked position
                 const rect = timeline.getBoundingClientRect();
                 const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                const time = snapToKept(pct * videoDuration);
-                videoPlayer.currentTime = time;
-                const displayPct = (time / videoDuration) * 100;
-                timelinePlayhead.style.left = displayPct + '%';
-                progressFilled.style.width = displayPct + '%';
-                updateTimeDisplay();
+                seekTo(snapToKept(pct * timelineDuration));
+
                 videoToolbar.classList.remove('hidden');
 
                 // Only allow segment selection when there are actual splits
@@ -606,7 +783,7 @@
         timelineSplitsLayer.innerHTML = '';
 
         splitPoints.forEach((time) => {
-            const pct = (time / videoDuration) * 100;
+            const pct = (time / timelineDuration) * 100;
             const marker = document.createElement('div');
             marker.className = 'split-marker';
             marker.style.left = pct + '%';
@@ -663,10 +840,13 @@
             return;
         }
 
-        // Get kept segments
+        // If timeline is longer than video, track that we need an extended end
+        const exportTimelineEnd = timelineDuration > videoDuration ? timelineDuration : videoDuration;
+
+        // Get kept segments (this only accounts for regular video duration cuts)
         const keptSegments = getSegments().filter(s => !s.removed);
 
-        if (keptSegments.length === 0) {
+        if (keptSegments.length === 0 && exportTimelineEnd <= videoDuration) {
             showToast('⚠️', 'Nothing left to download — all sections are removed.');
             return;
         }
@@ -676,7 +856,7 @@
         processingSubtext.textContent = 'Preparing…';
 
         try {
-            const editedBlob = await encodeKeptSegments(videoBlob, keptSegments, (progress) => {
+            const editedBlob = await encodeKeptSegments(videoBlob, keptSegments, exportTimelineEnd, (progress) => {
                 processingSubtext.textContent = progress;
             });
 
@@ -694,8 +874,8 @@
         }
     });
 
-    // ── Encode all kept segments in a single MediaRecorder session ──
-    function encodeKeptSegments(blob, segments, onProgress) {
+    // ── Encode all kept segments & extended timeline ─────────────────
+    function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
         return new Promise((resolve, reject) => {
             const url = URL.createObjectURL(blob);
             const tempVideo = document.createElement('video');
@@ -708,6 +888,10 @@
             let chunks = [];
             let canvas, ctx, canvasStream, recOptions;
             let animFrameId = null;
+            let virtualRecordingTime = 0; // Tracks total written output time
+            let isRenderingExtended = false; // Flag for when we render past video segments
+            let extendedStartTime = 0; // When we start rendering the extended part
+            let lastDrawTime = 0;
 
             // No need to fix Infinity duration — encoder uses segment times from the main player
             tempVideo.addEventListener('loadedmetadata', () => {
@@ -800,7 +984,7 @@
             function seekToSegment(idx) {
                 if (finished) return;
                 if (idx >= segments.length) {
-                    finishRecording();
+                    checkAndStartExtendedRendering();
                     return;
                 }
 
@@ -809,8 +993,6 @@
 
                 const targetTime = segments[idx].start;
 
-                // If already at the target (e.g., seeking to 0 when already at 0),
-                // start immediately — seeked event won't fire for no-op seeks
                 if (Math.abs(tempVideo.currentTime - targetTime) < 0.05) {
                     seeking = false;
 
@@ -823,6 +1005,7 @@
                     tempVideo.play().catch(() => {
                         advanceToNextSegment();
                     });
+                    lastDrawTime = performance.now();
                     drawFrame();
                     return;
                 }
@@ -841,44 +1024,103 @@
                     }
 
                     tempVideo.play().catch(() => {
-                        // play() failed — advance anyway
                         advanceToNextSegment();
                     });
+                    lastDrawTime = performance.now();
                     drawFrame();
                 }, { once: true });
             }
 
+            function checkAndStartExtendedRendering() {
+                // Determine how much real video we wrote
+                let writtenContentTime = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
+
+                // If exportDuration > videoDuration, we need to append some empty canvas
+                if (exportDuration > videoDuration) {
+                    onProgress(`Encoding extended timeline…`);
+                    isRenderingExtended = true;
+                    extendedStartTime = performance.now();
+                    lastDrawTime = extendedStartTime;
+
+                    if (recorder && recorder.state === 'inactive') {
+                        recorder.start(100);
+                    } else if (recorder && recorder.state === 'paused') {
+                        recorder.resume();
+                    }
+                    // Keep tempVideo paused on its last frame
+                    tempVideo.pause();
+                    drawExtendedFrame();
+                } else {
+                    finishRecording();
+                }
+            }
+
             // Single function to advance — prevents double-increment
             function advanceToNextSegment() {
-                if (finished || seeking) return;
+                if (finished || seeking || isRenderingExtended) return;
                 tempVideo.pause();
 
-                // Pause recorder while seeking to next segment to freeze the stream output
                 if (recorder && recorder.state === 'recording') {
                     recorder.pause();
                 }
 
                 currentSegIndex++;
                 if (currentSegIndex >= segments.length) {
-                    finishRecording();
+                    checkAndStartExtendedRendering();
                 } else {
                     seekToSegment(currentSegIndex);
                 }
             }
 
+            function drawExtendedFrame() {
+                if (finished) return;
+
+                const now = performance.now();
+                const deltaSec = (now - lastDrawTime) / 1000;
+                lastDrawTime = now;
+
+                virtualRecordingTime += deltaSec;
+
+                // Calculate mapping from virtualRecordingTime to timeline time
+                let totalVideoWritten = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
+
+                // AppTime is videoDuration + elapsed extended time
+                const currentExtAppTime = videoDuration + (virtualRecordingTime - totalVideoWritten);
+
+                if (currentExtAppTime >= exportDuration) {
+                    finishRecording();
+                    return;
+                }
+
+                // Draw black background for the extended duration (past the video)
+                ctx.fillStyle = "#000";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                try {
+                    drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, currentExtAppTime);
+                } catch (e) {
+                    console.warn('Overlay draw error:', e);
+                }
+                animFrameId = requestAnimationFrame(drawExtendedFrame);
+            }
+
             function drawFrame() {
-                if (finished || seeking || currentSegIndex >= segments.length) return;
+                if (finished || seeking || currentSegIndex >= segments.length || isRenderingExtended) return;
 
                 const seg = segments[currentSegIndex];
-                if (!seg) { finishRecording(); return; }
+                if (!seg) { checkAndStartExtendedRendering(); return; }
 
                 if (tempVideo.paused || tempVideo.ended || tempVideo.currentTime >= seg.end - 0.03) {
                     advanceToNextSegment();
                     return;
                 }
 
+                const now = performance.now();
+                const deltaSec = (now - lastDrawTime) / 1000;
+                lastDrawTime = now;
+                virtualRecordingTime += deltaSec;
+
                 ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
-                // Composite overlay items — wrapped in try-catch to prevent rAF loop from breaking
                 try {
                     drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, tempVideo.currentTime);
                 } catch (e) {
@@ -887,9 +1129,8 @@
                 animFrameId = requestAnimationFrame(drawFrame);
             }
 
-            // Safety net: timeupdate for segment boundary
             tempVideo.addEventListener('timeupdate', () => {
-                if (finished || seeking || currentSegIndex >= segments.length) return;
+                if (finished || seeking || currentSegIndex >= segments.length || isRenderingExtended) return;
                 const seg = segments[currentSegIndex];
                 if (!seg) return;
                 if (tempVideo.currentTime >= seg.end) {
@@ -897,9 +1138,8 @@
                 }
             });
 
-            // Safety net: video ended event
             tempVideo.addEventListener('ended', () => {
-                if (!finished) {
+                if (!finished && !isRenderingExtended) {
                     advanceToNextSegment();
                 }
             });
@@ -948,8 +1188,7 @@
     }
 
     function updateTimeDisplay() {
-        const current = videoPlayer.currentTime || 0;
-        timeDisplay.textContent = `${formatTime(current)} / ${formatTime(videoDuration)}`;
+        timeDisplay.textContent = `${formatTime(currentAppTime)} / ${formatTime(timelineDuration)}`;
     }
 
     function downloadBlob(blob, filename) {
@@ -1053,18 +1292,14 @@
         };
         track.items.push(item);
 
-        if (videoDuration > 0) {
+        if (timelineDuration > 0) {
             // Add a tiny microsecond offset so the playhead is definitively inside the item's time duration
-            const targetTime = Math.min(start + 0.001, videoDuration);
-            videoPlayer.currentTime = targetTime;
-            const displayPct = (targetTime / videoDuration) * 100;
-            timelinePlayhead.style.left = displayPct + '%';
-            progressFilled.style.width = displayPct + '%';
-            updateTimeDisplay();
+            const targetTime = Math.min(start + 0.001, timelineDuration);
+            seekTo(targetTime);
         }
 
         renderOverlayTracks();
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
         // Open editor immediately
         openOverlayEditor(trackId, item.id, true);
     }
@@ -1104,18 +1339,14 @@
                     // Cache image element
                     overlayImageCache[id] = img;
 
-                    if (videoDuration > 0) {
+                    if (timelineDuration > 0) {
                         // Add a tiny microsecond offset so the playhead is definitively inside the item's time duration
-                        const targetTime = Math.min(start + 0.001, videoDuration);
-                        videoPlayer.currentTime = targetTime;
-                        const displayPct = (targetTime / videoDuration) * 100;
-                        timelinePlayhead.style.left = displayPct + '%';
-                        progressFilled.style.width = displayPct + '%';
-                        updateTimeDisplay();
+                        const targetTime = Math.min(start + 0.001, timelineDuration);
+                        seekTo(targetTime);
                     }
 
                     renderOverlayTracks();
-                    renderOverlayPreview(videoPlayer.currentTime);
+                    renderOverlayPreview(currentAppTime);
                     showToast('🖼️', 'Image overlay added');
                 };
                 img.src = ev.target.result;
@@ -1131,8 +1362,9 @@
         if (!track) return;
         track.items = track.items.filter(i => i.id !== itemId);
         delete overlayImageCache[itemId];
+        updateTimelineDuration();
         renderOverlayTracks();
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
     }
 
     // ── Overlay Editor Popover ────────────────────────────────────
@@ -1334,9 +1566,9 @@
                 el.dataset.itemId = item.id;
                 el.dataset.trackId = track.id;
 
-                if (videoDuration > 0) {
-                    const leftPct = (item.start / videoDuration) * 100;
-                    const widthPct = (item.duration / videoDuration) * 100;
+                if (timelineDuration > 0) {
+                    const leftPct = (item.start / timelineDuration) * 100;
+                    const widthPct = (item.duration / timelineDuration) * 100;
                     el.style.left = leftPct + '%';
                     el.style.width = Math.max(widthPct, 0.5) + '%';
                 }
@@ -1398,15 +1630,10 @@
                     e.preventDefault();
                     e.stopPropagation();
 
-                    if (videoDuration > 0) {
+                    if (timelineDuration > 0) {
                         const rect = lane.getBoundingClientRect();
                         const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                        const clickTime = pct * videoDuration;
-                        videoPlayer.currentTime = clickTime;
-                        const displayPct = (clickTime / videoDuration) * 100;
-                        timelinePlayhead.style.left = displayPct + '%';
-                        progressFilled.style.width = displayPct + '%';
-                        updateTimeDisplay();
+                        seekTo(pct * timelineDuration);
                     }
 
                     startOverlayDrag(e, track.id, item.id, lane);
@@ -1416,16 +1643,11 @@
                     if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
                     e.stopPropagation();
 
-                    if (videoDuration > 0) {
+                    if (timelineDuration > 0) {
                         const rect = lane.getBoundingClientRect();
                         const clientX = e.touches[0].clientX;
                         const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-                        const clickTime = pct * videoDuration;
-                        videoPlayer.currentTime = clickTime;
-                        const displayPct = (clickTime / videoDuration) * 100;
-                        timelinePlayhead.style.left = displayPct + '%';
-                        progressFilled.style.width = displayPct + '%';
-                        updateTimeDisplay();
+                        seekTo(pct * timelineDuration);
                     }
 
                     startOverlayDrag(e, track.id, item.id, lane);
@@ -1462,11 +1684,13 @@
         const rect = draggingOverlayItem.rect;
         const currentPct = (e.clientX - rect.left) / rect.width;
         const deltaPct = currentPct - draggingOverlayItem.startPct;
-        let newStart = draggingOverlayItem.startTime + deltaPct * videoDuration;
-        newStart = Math.max(0, Math.min(videoDuration - item.duration, newStart));
+        let newStart = draggingOverlayItem.startTime + deltaPct * timelineDuration;
+        // Allow moving past videoDuration
+        newStart = Math.max(0, newStart);
         item.start = newStart;
+        updateTimelineDuration(); // Ensure timeline extends if moved past edge
         renderOverlayTracks();
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
     });
 
     document.addEventListener('touchmove', (e) => {
@@ -1478,11 +1702,12 @@
         const clientX = e.touches[0].clientX;
         const currentPct = (clientX - rect.left) / rect.width;
         const deltaPct = currentPct - draggingOverlayItem.startPct;
-        let newStart = draggingOverlayItem.startTime + deltaPct * videoDuration;
-        newStart = Math.max(0, Math.min(videoDuration - item.duration, newStart));
+        let newStart = draggingOverlayItem.startTime + deltaPct * timelineDuration;
+        newStart = Math.max(0, newStart);
         item.start = newStart;
+        updateTimelineDuration();
         renderOverlayTracks();
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
     }, { passive: true });
 
     document.addEventListener('mouseup', () => {
@@ -1551,13 +1776,13 @@
         if (!item) { resizingOverlayItem = null; return; }
 
         const deltaX = e.clientX - resizingOverlayItem.startX;
-        const deltaTime = (deltaX / resizingOverlayItem.laneWidth) * videoDuration;
+        const deltaTime = (deltaX / resizingOverlayItem.laneWidth) * timelineDuration;
         const minDuration = 0.2;
 
         if (resizingOverlayItem.edge === 'right') {
             // Dragging right edge: change duration, keep start fixed
             let newDuration = resizingOverlayItem.origDuration + deltaTime;
-            newDuration = Math.max(minDuration, Math.min(videoDuration - item.start, newDuration));
+            newDuration = Math.max(minDuration, newDuration);
             item.duration = newDuration;
         } else {
             // Dragging left edge: change start, keep end fixed
@@ -1568,8 +1793,9 @@
             item.duration = origEnd - newStart;
         }
 
+        updateTimelineDuration();
         renderOverlayTracks();
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
     });
 
     document.addEventListener('touchmove', (e) => {
@@ -1579,12 +1805,12 @@
 
         const clientX = e.touches[0].clientX;
         const deltaX = clientX - resizingOverlayItem.startX;
-        const deltaTime = (deltaX / resizingOverlayItem.laneWidth) * videoDuration;
+        const deltaTime = (deltaX / resizingOverlayItem.laneWidth) * timelineDuration;
         const minDuration = 0.2;
 
         if (resizingOverlayItem.edge === 'right') {
             let newDuration = resizingOverlayItem.origDuration + deltaTime;
-            newDuration = Math.max(minDuration, Math.min(videoDuration - item.start, newDuration));
+            newDuration = Math.max(minDuration, newDuration);
             item.duration = newDuration;
         } else {
             const origEnd = resizingOverlayItem.origStart + resizingOverlayItem.origDuration;
@@ -1594,8 +1820,9 @@
             item.duration = origEnd - newStart;
         }
 
+        updateTimelineDuration();
         renderOverlayTracks();
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
     }, { passive: true });
 
     // ── Update Lane Playheads ─────────────────────────────────────
