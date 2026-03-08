@@ -565,10 +565,24 @@
             }
         }
 
-        // Target duration is either video duration or furthest overlay
-        const targetDuration = Math.max(videoDuration, maxOverlayEnd);
+        // Check for removed video segments at the end of the timeline
+        let effectiveVideoEnd = 0;
+        if (typeof getSegments === 'function' && videoDuration > 0) {
+            const segments = getSegments();
+            for (let i = segments.length - 1; i >= 0; i--) {
+                if (!segments[i].removed) {
+                    effectiveVideoEnd = segments[i].end;
+                    break;
+                }
+            }
+        } else {
+            effectiveVideoEnd = videoDuration;
+        }
 
-        if (Math.abs(timelineDuration - targetDuration) > 0.05) {
+        // Target duration is either effective video duration or furthest overlay
+        const targetDuration = Math.max(effectiveVideoEnd, maxOverlayEnd);
+
+        if (Math.abs(timelineDuration - targetDuration) > 0.001) {
             timelineDuration = targetDuration;
 
             // Adjust scroll wrapper content size
@@ -840,8 +854,8 @@
             return;
         }
 
-        // If timeline is longer than video, track that we need an extended end
-        const exportTimelineEnd = timelineDuration > videoDuration ? timelineDuration : videoDuration;
+        // The timeline duration tracks precisely the logical video end plus any extensions
+        const exportTimelineEnd = timelineDuration;
 
         // Get kept segments (this only accounts for regular video duration cuts)
         const keptSegments = getSegments().filter(s => !s.removed);
@@ -1035,8 +1049,8 @@
                 // Determine how much real video we wrote
                 let writtenContentTime = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
 
-                // If exportDuration > videoDuration, we need to append some empty canvas
-                if (exportDuration > videoDuration) {
+                // If exportDuration > writtenContentTime, we need to append some empty canvas
+                if (exportDuration > writtenContentTime) {
                     onProgress(`Encoding extended timeline…`);
                     isRenderingExtended = true;
                     extendedStartTime = performance.now();
@@ -1083,9 +1097,10 @@
 
                 // Calculate mapping from virtualRecordingTime to timeline time
                 let totalVideoWritten = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
+                let effectiveVideoEnd = segments.length > 0 ? segments[segments.length - 1].end : 0;
 
-                // AppTime is videoDuration + elapsed extended time
-                const currentExtAppTime = videoDuration + (virtualRecordingTime - totalVideoWritten);
+                // AppTime is effectiveVideoEnd + elapsed extended time
+                const currentExtAppTime = effectiveVideoEnd + (virtualRecordingTime - totalVideoWritten);
 
                 if (currentExtAppTime >= exportDuration) {
                     finishRecording();
@@ -1292,6 +1307,8 @@
         };
         track.items.push(item);
 
+        updateTimelineDuration(); // Ensure timeline length adjusts
+
         if (timelineDuration > 0) {
             // Add a tiny microsecond offset so the playhead is definitively inside the item's time duration
             const targetTime = Math.min(start + 0.001, timelineDuration);
@@ -1338,6 +1355,8 @@
                     track.items.push(item);
                     // Cache image element
                     overlayImageCache[id] = img;
+
+                    updateTimelineDuration(); // Ensure timeline length adjusts
 
                     if (timelineDuration > 0) {
                         // Add a tiny microsecond offset so the playhead is definitively inside the item's time duration
@@ -1420,6 +1439,7 @@
         item.y = parseFloat(popoverY.value) || 50;
 
         closeOverlayEditor(false);
+        updateTimelineDuration(); // Duration could have changed
         renderOverlayTracks();
         renderOverlayPreview(videoPlayer.currentTime);
         showToast('✅', 'Overlay updated');
@@ -1497,8 +1517,8 @@
             // Playhead indicator in lane
             const lanePH = document.createElement('div');
             lanePH.className = 'lane-playhead';
-            if (videoDuration > 0) {
-                lanePH.style.left = ((videoPlayer.currentTime / videoDuration) * 100) + '%';
+            if (timelineDuration > 0) {
+                lanePH.style.left = ((currentAppTime / timelineDuration) * 100) + '%';
             }
             lane.appendChild(lanePH);
 
@@ -1523,11 +1543,11 @@
 
                 // Calculate start time based on click X relative to lane width
                 const pct = Math.max(0, Math.min(1, (clickX - rect.left) / rect.width));
-                const clickTime = pct * videoDuration;
+                const clickTime = pct * timelineDuration;
 
-                if (videoDuration > 0) {
-                    videoPlayer.currentTime = clickTime;
-                    const displayPct = (clickTime / videoDuration) * 100;
+                if (timelineDuration > 0) {
+                    seekTo(clickTime);
+                    const displayPct = (clickTime / timelineDuration) * 100;
                     timelinePlayhead.style.left = displayPct + '%';
                     progressFilled.style.width = displayPct + '%';
                     updateTimeDisplay();
@@ -1664,7 +1684,7 @@
     // ── Overlay Item Drag ─────────────────────────────────────────
     function startOverlayDrag(e, trackId, itemId, laneEl) {
         const item = getOverlayItem(trackId, itemId);
-        if (!item || videoDuration <= 0) return;
+        if (!item || timelineDuration <= 0) return;
 
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const rect = laneEl.getBoundingClientRect();
@@ -1754,7 +1774,7 @@
 
     function startOverlayResize(e, trackId, itemId, laneEl, edge) {
         const item = getOverlayItem(trackId, itemId);
-        if (!item || videoDuration <= 0) return;
+        if (!item || timelineDuration <= 0) return;
 
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const rect = laneEl.getBoundingClientRect();

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<link rel="stylesheet" href="editor.css">
+</head>
+<body style="width: 1000px; padding: 0; margin: 0;">
+  <div class="timeline-scroll-wrapper" id="timelineScrollWrapper">
+      <div class="timeline-scroll-content" id="timelineScrollContent" style="width: 100%;">
+          <div class="overlay-tracks-section">
+              <div class="overlay-tracks-container">
+                  <div class="overlay-track-row">
+                      <div class="overlay-track-sidebar" id="sidebar" style="width: 112px;"></div>
+                      <div class="overlay-track-lane" id="lane"></div>
+                  </div>
+              </div>
+          </div>
+          <div class="editor-section" id="editor">
+              <div class="timeline" id="timeline"></div>
+          </div>
+      </div>
+  </div>
+  <script>
+    const cw = document.getElementById('timelineScrollContent').getBoundingClientRect().width;
+    const lane = document.getElementById('lane').getBoundingClientRect();
+    const ed = document.getElementById('editor').getBoundingClientRect();
+    const tl = document.getElementById('timeline').getBoundingClientRect();
+    console.log("Content width:", cw);
+    console.log("Lane width:", lane.width, "Left:", lane.left);
+    console.log("Editor Section width:", ed.width, "Left:", ed.left);
+    console.log("Timeline width:", tl.width, "Left:", tl.left);
+  </script>
+</body>
+</html>
