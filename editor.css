@@ -499,7 +499,6 @@ body::before {
   min-width: 100%;
   padding: 0px 20px;
   position: relative;
-  transition: width var(--transition-normal);
 }
 
 .editor-header {
