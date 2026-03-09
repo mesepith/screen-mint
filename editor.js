@@ -794,9 +794,16 @@
                 // Always move playhead to clicked position
                 const rect = timeline.getBoundingClientRect();
                 const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                seekTo(snapToKept(pct * timelineDuration));
+                const clickTime = pct * timelineDuration;
+                seekTo(snapToKept(clickTime));
 
                 videoToolbar.classList.remove('hidden');
+
+                // Show the inline cut menu above the click position
+                showInlineCutMenu(e.clientX, rect, {
+                    type: 'timeline',
+                    time: clickTime
+                });
 
                 // Only allow segment selection when there are actual splits
                 if (splitPoints.length > 0) {
@@ -1506,6 +1513,129 @@
         renderOverlayPreview(currentAppTime);
     }
 
+    // ── Split Overlay Item ────────────────────────────────────────
+    function splitOverlayItem(trackId, itemId, splitTime) {
+        const track = getTrack(trackId);
+        if (!track) return;
+        const item = track.items.find(i => i.id === itemId);
+        if (!item) return;
+
+        // splitTime must be within the item's range
+        const relSplit = splitTime - item.start;
+        if (relSplit <= 0.1 || relSplit >= item.duration - 0.1) {
+            showToast('⚠️', 'Cannot cut too close to the edge');
+            return;
+        }
+
+        // Create the second half as a clone
+        const newId = generateOverlayId();
+        const secondHalf = { ...item, id: newId, start: splitTime, duration: item.duration - relSplit };
+
+        // For audio overlays, store offset into the original audio
+        if (item.type === 'audio') {
+            const existingOffset = item.audioOffset || 0;
+            secondHalf.audioOffset = existingOffset + relSplit;
+            // Clone the audio element for the new item
+            const audio = new Audio();
+            audio.src = item.audioSrc;
+            overlayAudioCache[newId] = audio;
+        }
+
+        // For image overlays, cache the same image for the new item
+        if (item.type === 'image' && overlayImageCache[item.id]) {
+            const img = new Image();
+            img.src = item.imageSrc;
+            overlayImageCache[newId] = img;
+        }
+
+        // Trim original item's duration
+        item.duration = relSplit;
+
+        // Insert second half right after the original
+        const idx = track.items.indexOf(item);
+        track.items.splice(idx + 1, 0, secondHalf);
+
+        updateTimelineDuration();
+        renderOverlayTracks();
+        renderOverlayPreview(currentAppTime);
+        showToast('✂️', `Cut overlay at ${formatTimePrecise(splitTime)}`);
+    }
+
+    // ── Inline Cut Menu State ─────────────────────────────────────
+    let pendingCutAction = null; // { type: 'overlay'|'timeline', trackId?, itemId?, time }
+
+    function showInlineCutMenu(clientX, anchorRect, cutAction) {
+        const cutMenu = document.getElementById('inlineCutMenu');
+        if (!cutMenu) return;
+
+        pendingCutAction = cutAction;
+
+        // Make visible first so we can measure offsetHeight correctly
+        cutMenu.style.display = 'flex';
+
+        // Position: centered at click X, just above the anchor element
+        cutMenu.style.left = clientX + 'px';
+        cutMenu.style.top = (anchorRect.top + window.scrollY - cutMenu.offsetHeight - 8) + 'px';
+
+        // Rebind the cut button (clone to remove old listeners)
+        const cutBtn = document.getElementById('inlineCutBtn');
+        const newCutBtn = cutBtn.cloneNode(true);
+        cutBtn.parentNode.replaceChild(newCutBtn, cutBtn);
+
+        newCutBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cutMenu.style.display = 'none';
+            if (!pendingCutAction) return;
+
+            if (pendingCutAction.type === 'overlay') {
+                splitOverlayItem(pendingCutAction.trackId, pendingCutAction.itemId, pendingCutAction.time);
+            } else if (pendingCutAction.type === 'timeline') {
+                addSplit(pendingCutAction.time);
+            }
+            pendingCutAction = null;
+        });
+
+        // Rebind the delete button
+        const delBtn = document.getElementById('inlineDeleteBtn');
+        const newDelBtn = delBtn.cloneNode(true);
+        delBtn.parentNode.replaceChild(newDelBtn, delBtn);
+
+        newDelBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cutMenu.style.display = 'none';
+            if (!pendingCutAction) return;
+
+            if (pendingCutAction.type === 'overlay') {
+                removeOverlayItem(pendingCutAction.trackId, pendingCutAction.itemId);
+            } else if (pendingCutAction.type === 'timeline') {
+                // Find segment index from time
+                const segments = getSegments();
+                let segIdx = segments.length - 1;
+                for (let i = 0; i < segments.length; i++) {
+                    if (pendingCutAction.time >= segments[i].start && pendingCutAction.time <= segments[i].end) {
+                        segIdx = i;
+                        break;
+                    }
+                }
+                saveUndoState();
+                removedFlags[segIdx] = true;
+                const seg = segments[segIdx];
+                showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
+
+                selectedSegIdx = null;
+                renderTimeline();
+                updateControls();
+            }
+            pendingCutAction = null;
+        });
+    }
+
+    function hideInlineCutMenu() {
+        const cutMenu = document.getElementById('inlineCutMenu');
+        if (cutMenu) cutMenu.style.display = 'none';
+        pendingCutAction = null;
+    }
+
     // ── Overlay Editor Popover ────────────────────────────────────
     let popoverBackdrop = null;
 
@@ -1790,10 +1920,19 @@
                 }
 
                 // Drag to reposition in time (skip if clicking on resize handles or delete)
+                // Track mousedown position to distinguish click vs drag
+                let overlayMouseDownX = 0;
+                let overlayMouseDownY = 0;
+                let overlayWasDragged = false;
+
                 el.addEventListener('mousedown', (e) => {
                     if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
                     e.preventDefault();
                     e.stopPropagation();
+
+                    overlayMouseDownX = e.clientX;
+                    overlayMouseDownY = e.clientY;
+                    overlayWasDragged = false;
 
                     if (timelineDuration > 0) {
                         const rect = lane.getBoundingClientRect();
@@ -1802,6 +1941,35 @@
                     }
 
                     startOverlayDrag(e, track.id, item.id, lane);
+                });
+
+                el.addEventListener('mousemove', () => {
+                    overlayWasDragged = true;
+                });
+
+                el.addEventListener('mouseup', (e) => {
+                    if (e.target.classList.contains('overlay-item-delete') || e.target.classList.contains('overlay-resize-handle')) return;
+                    const dx = Math.abs(e.clientX - overlayMouseDownX);
+                    const dy = Math.abs(e.clientY - overlayMouseDownY);
+                    // Only show cut menu if user clicked (didn't drag)
+                    if (dx < 5 && dy < 5) {
+                        e.stopPropagation();
+                        // Calculate the time at click position
+                        const rect = lane.getBoundingClientRect();
+                        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                        const clickTime = pct * timelineDuration;
+
+                        // Hide the inline add menu if visible
+                        const addMenu = document.getElementById('inlineTrackMenu');
+                        if (addMenu) addMenu.style.display = 'none';
+
+                        showInlineCutMenu(e.clientX, rect, {
+                            type: 'overlay',
+                            trackId: track.id,
+                            itemId: item.id,
+                            time: clickTime
+                        });
+                    }
                 });
 
                 el.addEventListener('touchstart', (e) => {
@@ -1935,7 +2103,7 @@
         }
     });
 
-    // Hide inline menu on outside click and pause playback if playing
+    // Hide inline menus on outside click and pause playback if playing
     document.addEventListener('click', (e) => {
         // Pause playback if clicking anywhere while playing
         if (isAppPlaying) {
@@ -1947,6 +2115,7 @@
             }
         }
 
+        // Hide inline add menu
         const menu = document.getElementById('inlineTrackMenu');
         if (menu && menu.style.display !== 'none') {
             // Ignore clicks directly inside the menu itself
@@ -1959,6 +2128,16 @@
             }
 
             menu.style.display = 'none';
+        }
+
+        // Hide inline cut menu
+        const cutMenu = document.getElementById('inlineCutMenu');
+        if (cutMenu && cutMenu.style.display !== 'none') {
+            if (cutMenu.contains(e.target)) return;
+            // Don't hide if clicking on overlay items or timeline (they'll re-show it)
+            if (e.target.closest('.overlay-item') || e.target.closest('.segment-overlay')) return;
+            cutMenu.style.display = 'none';
+            pendingCutAction = null;
         }
     });
 

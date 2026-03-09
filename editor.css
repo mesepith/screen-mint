@@ -1729,3 +1729,56 @@ body::before {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
+
+/* ── Inline Cut Menu ───────────────────────────────────────────── */
+.inline-cut-menu {
+  position: absolute;
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  display: flex;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  z-index: 50;
+  padding: 6px;
+  gap: 8px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.inline-cut-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: none;
+  background: #ffffff;
+  color: #12121a;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+  box-shadow: var(--shadow-sm);
+  white-space: nowrap;
+}
+
+.inline-cut-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.inline-cut-btn:hover {
+  background: #f0f0f5;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.inline-cut-btn.btn-delete {
+  color: #ef4444;
+}
+
+.inline-cut-btn.btn-delete:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
