@@ -1935,8 +1935,18 @@
         }
     });
 
-    // Hide inline menu on outside click
+    // Hide inline menu on outside click and pause playback if playing
     document.addEventListener('click', (e) => {
+        // Pause playback if clicking anywhere while playing
+        if (isAppPlaying) {
+            // Don't pause if clicking on playback controls themselves
+            if (!e.target.closest('.controls-bar') && !e.target.closest('.video-toolbar')) {
+                isAppPlaying = false;
+                videoPlayer.pause();
+                stopVirtualPlayback();
+            }
+        }
+
         const menu = document.getElementById('inlineTrackMenu');
         if (menu && menu.style.display !== 'none') {
             // Ignore clicks directly inside the menu itself
