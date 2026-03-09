@@ -948,7 +948,7 @@
                     // Connect video audio
                     const source = audioCtx.createMediaElementSource(tempVideo);
                     source.connect(dest);
-                    source.connect(audioCtx.destination);
+                    // Do NOT connect to audioCtx.destination to prevent it from playing aloud to speakers
 
                     // Connect overlay audio items
                     const exportAudioElements = [];
@@ -961,7 +961,7 @@
                             try {
                                 const audioSource = audioCtx.createMediaElementSource(audioEl);
                                 audioSource.connect(dest);
-                                audioSource.connect(audioCtx.destination);
+                                // Do NOT connect to audioCtx.destination
                                 exportAudioElements.push({ el: audioEl, start: item.start, duration: item.duration });
                             } catch (_ae) { /* skip if fails */ }
                         }
