@@ -87,6 +87,8 @@
     let editingOverlay = null;    // {trackId, itemId} or null
     let draggingOverlayItem = null; // drag state for overlay items
     let overlayImageCache = {};   // id -> HTMLImageElement
+    let overlayAudioCache = {};   // id -> HTMLAudioElement
+    let activeAudioOverlays = new Set(); // track which audio overlays are currently playing
 
     function saveUndoState() {
         undoStack.push({
@@ -267,6 +269,7 @@
             playIcon.style.display = 'block';
             pauseIcon.style.display = 'none';
             playOverlay.classList.remove('hidden');
+            stopAllOverlayAudio();
         }
     });
 
@@ -300,6 +303,8 @@
         if (videoPlayer.paused) {
             playOverlay.classList.remove('hidden');
         }
+        // Stop all overlay audio on playback stop
+        stopAllOverlayAudio();
     }
 
     function virtualPlayLoop(time) {
@@ -340,6 +345,8 @@
             // Render overlay preview & update lane playheads
             renderOverlayPreview(currentAppTime);
             updateLanePlayheads(pct);
+            // Sync overlay audio playback
+            syncOverlayAudio(currentAppTime);
         }
         updateTimeDisplay();
     }
@@ -374,6 +381,8 @@
             // Render overlay preview & update lane playheads
             renderOverlayPreview(currentAppTime);
             updateLanePlayheads(pct);
+            // Sync overlay audio playback
+            if (!videoPlayer.paused) syncOverlayAudio(currentAppTime);
         }
         updateTimeDisplay();
     });
@@ -931,14 +940,57 @@
                 ctx = canvas.getContext('2d');
                 canvasStream = canvas.captureStream(30);
 
-                // Try to capture audio
+                // Try to capture audio (video + overlay audio)
                 try {
                     const audioCtx = new AudioContext();
-                    const source = audioCtx.createMediaElementSource(tempVideo);
                     const dest = audioCtx.createMediaStreamDestination();
+
+                    // Connect video audio
+                    const source = audioCtx.createMediaElementSource(tempVideo);
                     source.connect(dest);
                     source.connect(audioCtx.destination);
+
+                    // Connect overlay audio items
+                    const exportAudioElements = [];
+                    for (const track of overlayTracks) {
+                        for (const item of track.items) {
+                            if (item.type !== 'audio' || !item.audioSrc) continue;
+                            const audioEl = new Audio(item.audioSrc);
+                            audioEl.crossOrigin = 'anonymous';
+                            audioEl.volume = (item.volume != null ? item.volume : 100) / 100;
+                            try {
+                                const audioSource = audioCtx.createMediaElementSource(audioEl);
+                                audioSource.connect(dest);
+                                audioSource.connect(audioCtx.destination);
+                                exportAudioElements.push({ el: audioEl, start: item.start, duration: item.duration });
+                            } catch (_ae) { /* skip if fails */ }
+                        }
+                    }
+
                     dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+
+                    // Schedule overlay audio playback at correct times
+                    // We store these so we can clean them up in finishRecording
+                    const audioTimeouts = [];
+                    for (const ea of exportAudioElements) {
+                        const delayMs = Math.max(0, ea.start * 1000);
+                        const tid = setTimeout(() => {
+                            ea.el.currentTime = 0;
+                            ea.el.play().catch(() => { });
+                            // Stop after duration
+                            const stopTid = setTimeout(() => {
+                                ea.el.pause();
+                            }, ea.duration * 1000);
+                            audioTimeouts.push(stopTid);
+                        }, delayMs);
+                        audioTimeouts.push(tid);
+                    }
+
+                    // Store for cleanup
+                    canvasStream._exportAudioCleanup = () => {
+                        audioTimeouts.forEach(t => clearTimeout(t));
+                        exportAudioElements.forEach(ea => { try { ea.el.pause(); } catch (_) { } });
+                    };
                 } catch (_e) { /* no audio */ }
 
                 // Choose codec
@@ -988,6 +1040,10 @@
                 if (encodingTimeout) clearTimeout(encodingTimeout);
                 tempVideo.pause();
                 if (animFrameId) cancelAnimationFrame(animFrameId);
+                // Clean up export overlay audio
+                if (canvasStream && canvasStream._exportAudioCleanup) {
+                    canvasStream._exportAudioCleanup();
+                }
                 // Force stop regardless of state
                 try {
                     if (recorder && recorder.state !== 'inactive') {
@@ -1381,12 +1437,70 @@
         input.click();
     }
 
+    // ── Add Audio Overlay ──────────────────────────────────────────
+    function addAudioOverlay(trackId, startTime = null) {
+        const track = getTrack(trackId);
+        if (!track) return;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'audio/mp3,audio/mpeg,audio/wav,audio/ogg,audio/aac,audio/webm,audio/flac,audio/mp4,audio/x-m4a,audio/*';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const audio = new Audio();
+                audio.src = ev.target.result;
+                audio.addEventListener('loadedmetadata', () => {
+                    const id = generateOverlayId();
+                    const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
+                    const audioDuration = isFinite(audio.duration) ? audio.duration : 5;
+                    const item = {
+                        id,
+                        type: 'audio',
+                        start: start,
+                        duration: audioDuration,
+                        audioSrc: ev.target.result,
+                        audioName: file.name.replace(/\.[^/.]+$/, ''), // filename without extension
+                        volume: 100,
+                        opacity: 100
+                    };
+                    track.items.push(item);
+                    // Cache audio element
+                    overlayAudioCache[id] = audio;
+
+                    updateTimelineDuration();
+
+                    if (timelineDuration > 0) {
+                        const targetTime = Math.min(start + 0.001, timelineDuration);
+                        seekTo(targetTime);
+                    }
+
+                    renderOverlayTracks();
+                    renderOverlayPreview(currentAppTime);
+                    showToast('🎵', 'Audio overlay added');
+                });
+                audio.addEventListener('error', () => {
+                    showToast('❌', 'Failed to load audio file');
+                });
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    }
+
     // ── Remove Overlay Item ───────────────────────────────────────
     function removeOverlayItem(trackId, itemId) {
         const track = getTrack(trackId);
         if (!track) return;
         track.items = track.items.filter(i => i.id !== itemId);
         delete overlayImageCache[itemId];
+        // Clean up audio cache
+        if (overlayAudioCache[itemId]) {
+            overlayAudioCache[itemId].pause();
+            delete overlayAudioCache[itemId];
+            activeAudioOverlays.delete(itemId);
+        }
         updateTimelineDuration();
         renderOverlayTracks();
         renderOverlayPreview(currentAppTime);
@@ -1498,6 +1612,13 @@
             imgBtn.addEventListener('click', () => addImageOverlay(track.id));
             btns.appendChild(imgBtn);
 
+            // + Audio button
+            const audioBtn = document.createElement('button');
+            audioBtn.className = 'overlay-track-btn';
+            audioBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg> Audio';
+            audioBtn.addEventListener('click', () => addAudioOverlay(track.id));
+            btns.appendChild(audioBtn);
+
             // Delete track button
             const delBtn = document.createElement('button');
             delBtn.className = 'overlay-track-btn btn-delete-track';
@@ -1532,7 +1653,7 @@
             if (track.items.length === 0) {
                 const placeholder = document.createElement('div');
                 placeholder.className = 'overlay-track-placeholder';
-                placeholder.textContent = 'Add Text and Image';
+                placeholder.textContent = 'Add Text, Image, or Audio';
                 lane.appendChild(placeholder);
             }
 
@@ -1568,12 +1689,15 @@
                 // Update inline button listeners
                 const textBtn = document.getElementById('inlineTextBtn');
                 const imgBtn = document.getElementById('inlineImageBtn');
+                const audBtn = document.getElementById('inlineAudioBtn');
 
                 // Remove old listeners to avoid multiple triggers
                 const newTextBtn = textBtn.cloneNode(true);
                 const newImgBtn = imgBtn.cloneNode(true);
+                const newAudBtn = audBtn.cloneNode(true);
                 textBtn.parentNode.replaceChild(newTextBtn, textBtn);
                 imgBtn.parentNode.replaceChild(newImgBtn, imgBtn);
+                audBtn.parentNode.replaceChild(newAudBtn, audBtn);
 
                 newTextBtn.addEventListener('click', () => {
                     menu.style.display = 'none';
@@ -1584,11 +1708,17 @@
                     menu.style.display = 'none';
                     addImageOverlay(track.id, clickTime);
                 });
+
+                newAudBtn.addEventListener('click', () => {
+                    menu.style.display = 'none';
+                    addAudioOverlay(track.id, clickTime);
+                });
             });
 
             track.items.forEach(item => {
                 const el = document.createElement('div');
-                el.className = 'overlay-item ' + (item.type === 'text' ? 'overlay-item-text' : 'overlay-item-image');
+                const itemTypeClass = item.type === 'text' ? 'overlay-item-text' : (item.type === 'image' ? 'overlay-item-image' : 'overlay-item-audio');
+                el.className = 'overlay-item ' + itemTypeClass;
                 el.dataset.itemId = item.id;
                 el.dataset.trackId = track.id;
 
@@ -1610,6 +1740,15 @@
                     thumb.src = item.imageSrc;
                     thumb.draggable = false;
                     el.appendChild(thumb);
+                } else if (item.type === 'audio') {
+                    const icon = document.createElement('span');
+                    icon.className = 'audio-icon';
+                    icon.textContent = '🎵';
+                    el.appendChild(icon);
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = item.audioName || 'Audio';
+                    nameSpan.style.pointerEvents = 'none';
+                    el.appendChild(nameSpan);
                 }
 
                 // Delete button
@@ -2021,6 +2160,69 @@
                 }
             }
         }
+    }
+
+    // ── Audio Overlay Playback Sync ───────────────────────────────
+    function syncOverlayAudio(currentTime) {
+        const shouldBeActive = new Set();
+        const shouldPlay = isAppPlaying; // Only play if video playback is active
+
+        for (const track of overlayTracks) {
+            for (const item of track.items) {
+                if (item.type !== 'audio') continue;
+                const inRange = currentTime >= item.start && currentTime < item.start + item.duration;
+
+                if (inRange && shouldPlay) {
+                    shouldBeActive.add(item.id);
+
+                    let audio = overlayAudioCache[item.id];
+                    if (!audio) {
+                        audio = new Audio(item.audioSrc);
+                        overlayAudioCache[item.id] = audio;
+                    }
+
+                    // Set volume
+                    audio.volume = (item.volume != null ? item.volume : 100) / 100;
+
+                    const audioOffset = currentTime - item.start;
+                    if (!activeAudioOverlays.has(item.id)) {
+                        // Start playing this audio
+                        audio.currentTime = Math.min(audioOffset, audio.duration || audioOffset);
+                        audio.play().catch(() => { }); // Ignore autoplay policy errors
+                        activeAudioOverlays.add(item.id);
+                    } else {
+                        // Already playing — correct drift if > 0.3s off
+                        const expectedTime = audioOffset;
+                        if (Math.abs(audio.currentTime - expectedTime) > 0.3) {
+                            audio.currentTime = Math.min(expectedTime, audio.duration || expectedTime);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Stop audio overlays that are no longer in range (or shouldn't be playing)
+        for (const id of activeAudioOverlays) {
+            if (!shouldBeActive.has(id)) {
+                const audio = overlayAudioCache[id];
+                if (audio) {
+                    audio.pause();
+                    audio.currentTime = 0;
+                }
+                activeAudioOverlays.delete(id);
+            }
+        }
+    }
+
+    function stopAllOverlayAudio() {
+        for (const id of activeAudioOverlays) {
+            const audio = overlayAudioCache[id];
+            if (audio) {
+                audio.pause();
+                audio.currentTime = 0;
+            }
+        }
+        activeAudioOverlays.clear();
     }
 
     // Initial render

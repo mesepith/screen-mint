@@ -1411,6 +1411,17 @@ body::before {
   border: 1px solid rgba(34, 197, 94, 0.4);
 }
 
+/* Audio overlay item */
+.overlay-item-audio {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.55), rgba(249, 115, 22, 0.55));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.overlay-item-audio .audio-icon {
+  margin-right: 3px;
+  font-size: 0.7rem;
+}
+
 .overlay-item-image img {
   width: 100%;
   height: 100%;
