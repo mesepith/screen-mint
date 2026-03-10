@@ -126,6 +126,7 @@
         renderOverlayTracks();
         renderOverlayPreview(currentAppTime);
         updateTimelineDuration();
+        drawWaveform(); // Refresh waveform after undo
         showToast('↩️', 'Undone');
     }
 
@@ -583,17 +584,39 @@
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
         const w = rect.width, h = rect.height;
-        const videoW = timelineDuration > 0 ? w * (videoDuration / timelineDuration) : w;
 
-        const barCount = Math.floor(videoW / 4);
+        // Get segments to determine removed regions
+        const segments = typeof getSegments === 'function' ? getSegments() : [];
+        const removedSegs = segments.filter(s => s.removed);
+
+        // Map bars across the full canvas width using timelineDuration.
+        // This ensures the waveform aligns with the segment overlay layer,
+        // which also positions segments relative to timelineDuration.
+        const barCount = Math.floor(w / 4);
         const barWidth = 2;
-        const gap = barCount > 1 ? (videoW - barCount * barWidth) / (barCount - 1) : 0;
+        const gap = barCount > 1 ? (w - barCount * barWidth) / (barCount - 1) : 0;
 
         ctx.clearRect(0, 0, w, h);
 
         for (let i = 0; i < barCount; i++) {
             const x = i * (barWidth + gap);
-            if (x + barWidth > videoW) break; // Do not draw waves past the end of the video timeline segment
+            if (x + barWidth > w) break;
+
+            // Map bar position to time using timelineDuration (same coordinate space as segments)
+            const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
+
+            // Don't draw bars past the actual video content
+            if (barTime > videoDuration) continue;
+
+            // Skip bars that fall within a removed segment
+            let isRemoved = false;
+            for (const rs of removedSegs) {
+                if (barTime >= rs.start && barTime < rs.end) {
+                    isRemoved = true;
+                    break;
+                }
+            }
+            if (isRemoved) continue;
 
             const noise1 = Math.sin(i * 0.15) * 0.3;
             const noise2 = Math.sin(i * 0.4 + 1.5) * 0.2;
@@ -651,11 +674,12 @@
             }
         }
 
-        // Check for removed video segments at the end of the timeline
-        let effectiveVideoEnd = getEffectiveVideoEnd();
+        // Use videoDuration instead of effectiveVideoEnd so the timeline doesn't shrink visually
+        // when the end of the video is removed. It will instead show a blank gap.
+        let baseDuration = videoDuration;
 
-        // Target duration is either effective video duration or furthest overlay
-        const targetDuration = Math.max(effectiveVideoEnd, maxOverlayEnd);
+        // Target duration is either full video duration or furthest overlay
+        const targetDuration = Math.max(baseDuration, maxOverlayEnd);
         let finalTarget = targetDuration;
 
         if (typeof draggingOverlayItem !== 'undefined' && (draggingOverlayItem || resizingOverlayItem)) {
@@ -769,6 +793,7 @@
 
         selectedSegIdx = null;
         updateTimelineDuration(); // Recalculate timeline bounds
+        drawWaveform(); // Redraw waveform to blank out removed region
         renderTimeline();
         updateControls();
     });
@@ -919,8 +944,15 @@
             return;
         }
 
-        // The timeline duration tracks precisely the logical video end plus any extensions
-        const exportTimelineEnd = timelineDuration;
+        // Calculate export timeline duration (actual video end + extensions)
+        let maxOverlayEnd = 0;
+        for (const track of overlayTracks) {
+            for (const item of track.items) {
+                const end = item.start + item.duration;
+                if (end > maxOverlayEnd) maxOverlayEnd = end;
+            }
+        }
+        const exportTimelineEnd = Math.max(getEffectiveVideoEnd(), maxOverlayEnd);
 
         // Get kept segments (this only accounts for regular video duration cuts)
         const keptSegments = getSegments().filter(s => !s.removed);
@@ -1754,6 +1786,8 @@
                 showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
 
                 selectedSegIdx = null;
+                updateTimelineDuration(); // Recalculate timeline bounds
+                drawWaveform(); // Redraw waveform to blank out removed region
                 renderTimeline();
                 updateControls();
             }
