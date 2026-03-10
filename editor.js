@@ -227,7 +227,8 @@
                 syncOverlayAudio(currentAppTime);
             });
 
-            if (currentAppTime < videoDuration) {
+            const effectiveVideoEnd = typeof getEffectiveVideoEnd === 'function' ? getEffectiveVideoEnd() : videoDuration;
+            if (currentAppTime < effectiveVideoEnd) {
                 stopVirtualPlayback();
                 videoPlayer.play();
                 playIcon.style.display = 'none';
@@ -248,7 +249,8 @@
     function seekTo(targetTime) {
         currentAppTime = targetTime;
 
-        if (currentAppTime < videoDuration) {
+        const effectiveVideoEnd = typeof getEffectiveVideoEnd === 'function' ? getEffectiveVideoEnd() : videoDuration;
+        if (currentAppTime < effectiveVideoEnd) {
             videoPlayer.currentTime = currentAppTime;
             if (isAppPlaying) {
                 videoPlayer.play();
@@ -258,7 +260,7 @@
                 stopVirtualPlayback();
             }
         } else {
-            videoPlayer.currentTime = videoDuration;
+            videoPlayer.currentTime = effectiveVideoEnd;
             videoPlayer.pause();
             if (isAppPlaying) {
                 startVirtualPlayback();
@@ -285,7 +287,8 @@
     });
 
     videoPlayer.addEventListener('ended', () => {
-        if (timelineDuration > videoDuration) {
+        const effectiveVideoEnd = typeof getEffectiveVideoEnd === 'function' ? getEffectiveVideoEnd() : videoDuration;
+        if (timelineDuration > effectiveVideoEnd) {
             if (isAppPlaying) {
                 startVirtualPlayback();
             }
@@ -623,17 +626,7 @@
         timelineLabelEnd.textContent = formatTimePrecise(timelineDuration);
     }
 
-    function updateTimelineDuration() {
-        // Calculate max end time of all overlays
-        let maxOverlayEnd = 0;
-        for (const track of overlayTracks) {
-            for (const item of track.items) {
-                const end = item.start + item.duration;
-                if (end > maxOverlayEnd) maxOverlayEnd = end;
-            }
-        }
-
-        // Check for removed video segments at the end of the timeline
+    function getEffectiveVideoEnd() {
         let effectiveVideoEnd = 0;
         if (typeof getSegments === 'function' && videoDuration > 0) {
             const segments = getSegments();
@@ -646,6 +639,21 @@
         } else {
             effectiveVideoEnd = videoDuration;
         }
+        return effectiveVideoEnd;
+    }
+
+    function updateTimelineDuration() {
+        // Calculate max end time of all overlays
+        let maxOverlayEnd = 0;
+        for (const track of overlayTracks) {
+            for (const item of track.items) {
+                const end = item.start + item.duration;
+                if (end > maxOverlayEnd) maxOverlayEnd = end;
+            }
+        }
+
+        // Check for removed video segments at the end of the timeline
+        let effectiveVideoEnd = getEffectiveVideoEnd();
 
         // Target duration is either effective video duration or furthest overlay
         const targetDuration = Math.max(effectiveVideoEnd, maxOverlayEnd);
@@ -1040,26 +1048,36 @@
 
                     dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
 
-                    // Schedule overlay audio playback at correct times
+                    // Use dynamic sync instead of setTimeout
                     // We store these so we can clean them up in finishRecording
-                    const audioTimeouts = [];
-                    for (const ea of exportAudioElements) {
-                        const delayMs = Math.max(0, ea.start * 1000);
-                        const tid = setTimeout(() => {
-                            ea.el.currentTime = ea.audioOffset;
-                            ea.el.play().catch(() => { });
-                            // Stop after duration
-                            const stopTid = setTimeout(() => {
-                                ea.el.pause();
-                            }, ea.duration * 1000);
-                            audioTimeouts.push(stopTid);
-                        }, delayMs);
-                        audioTimeouts.push(tid);
-                    }
+                    canvasStream._exportAudioCleanup = () => {
+                        exportAudioElements.forEach(ea => { try { ea.el.pause(); } catch (_) { } });
+                    };
+
+                    // Implement frame-by-frame audio sync
+                    canvasStream._syncExportAudio = (appTime) => {
+                        for (const ea of exportAudioElements) {
+                            if (appTime >= ea.start && appTime < ea.start + ea.duration) {
+                                if (ea.el.paused) {
+                                    ea.el.currentTime = ea.audioOffset + (appTime - ea.start);
+                                    ea.el.play().catch(() => { });
+                                } else {
+                                    // Drift correction
+                                    const expectedTime = ea.audioOffset + (appTime - ea.start);
+                                    if (Math.abs(ea.el.currentTime - expectedTime) > 0.15) {
+                                        ea.el.currentTime = expectedTime;
+                                    }
+                                }
+                            } else {
+                                if (!ea.el.paused) {
+                                    ea.el.pause();
+                                }
+                            }
+                        }
+                    };
 
                     // Store for cleanup
                     canvasStream._exportAudioCleanup = () => {
-                        audioTimeouts.forEach(t => clearTimeout(t));
                         exportAudioElements.forEach(ea => { try { ea.el.pause(); } catch (_) { } });
                     };
                 } catch (_e) { /* no audio */ }
@@ -1230,10 +1248,9 @@
 
                 // Calculate mapping from virtualRecordingTime to timeline time
                 let totalVideoWritten = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
-                let effectiveVideoEnd = segments.length > 0 ? segments[segments.length - 1].end : 0;
 
-                // AppTime is effectiveVideoEnd + elapsed extended time
-                const currentExtAppTime = effectiveVideoEnd + (virtualRecordingTime - totalVideoWritten);
+                // AppTime is totalVideoWritten + elapsed extended time
+                const currentExtAppTime = totalVideoWritten + (virtualRecordingTime - totalVideoWritten);
 
                 if (currentExtAppTime >= exportDuration) {
                     finishRecording();
@@ -1248,6 +1265,10 @@
                     drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, currentExtAppTime);
                 } catch (e) {
                     console.warn('Overlay draw error:', e);
+                }
+
+                if (canvasStream && canvasStream._syncExportAudio) {
+                    canvasStream._syncExportAudio(currentExtAppTime);
                 }
                 animFrameId = requestAnimationFrame(drawExtendedFrame);
             }
@@ -1273,6 +1294,10 @@
                     drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, tempVideo.currentTime);
                 } catch (e) {
                     console.warn('Overlay draw error:', e);
+                }
+
+                if (canvasStream && canvasStream._syncExportAudio) {
+                    canvasStream._syncExportAudio(tempVideo.currentTime);
                 }
                 animFrameId = requestAnimationFrame(drawFrame);
             }
