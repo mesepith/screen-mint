@@ -769,6 +769,7 @@
         showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
 
         selectedSegIdx = null;
+        updateTimelineDuration(); // Recalculate timeline bounds
         renderTimeline();
         updateControls();
     });
@@ -783,6 +784,7 @@
         showToast('↩️', `Restored ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
 
         selectedSegIdx = null;
+        updateTimelineDuration(); // Recalculate timeline bounds
         renderTimeline();
         updateControls();
     });
@@ -801,6 +803,7 @@
         splitPoints = [];
         removedFlags = [false];
         selectedSegIdx = null;
+        updateTimelineDuration(); // Recalculate timeline bounds
         renderTimeline();
         updateControls();
         showToast('🔄', 'All changes cleared — press Ctrl+Z to undo');
@@ -829,8 +832,11 @@
         // we must scale them back relative to timelineDuration for correct rendering
 
         segments.forEach((seg, idx) => {
+            if (seg.start >= timelineDuration) return; // Completely off-timeline (past end)
+
+            const renderEnd = Math.min(seg.end, timelineDuration);
             const leftPct = (seg.start / timelineDuration) * 100;
-            const widthPct = ((seg.end - seg.start) / timelineDuration) * 100;
+            const widthPct = ((renderEnd - seg.start) / timelineDuration) * 100;
 
             const el = document.createElement('div');
             el.className = 'segment-overlay';
