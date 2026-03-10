@@ -39,7 +39,6 @@
     const videoToolbar = document.getElementById('videoToolbar');
     const splitBtn = document.getElementById('splitBtn');
     const removeSectionBtn = document.getElementById('removeSectionBtn');
-    const restoreSectionBtn = document.getElementById('restoreSectionBtn');
     const deselectBtn = document.getElementById('deselectBtn');
     const resetAllBtn = document.getElementById('resetAllBtn');
     const editorInfo = document.getElementById('editorInfo');
@@ -774,21 +773,6 @@
         updateControls();
     });
 
-    // ── Restore selected segment ──────────────────────────────────
-    restoreSectionBtn.addEventListener('click', () => {
-        if (selectedSegIdx === null) return;
-        saveUndoState();
-        removedFlags[selectedSegIdx] = false;
-
-        const seg = getSegments()[selectedSegIdx];
-        showToast('↩️', `Restored ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
-
-        selectedSegIdx = null;
-        updateTimelineDuration(); // Recalculate timeline bounds
-        renderTimeline();
-        updateControls();
-    });
-
     // ── Deselect ──────────────────────────────────────────────────
     deselectBtn.addEventListener('click', () => {
         selectedSegIdx = null;
@@ -832,6 +816,7 @@
         // we must scale them back relative to timelineDuration for correct rendering
 
         segments.forEach((seg, idx) => {
+            if (seg.removed) return; // Completely hide removed segments
             if (seg.start >= timelineDuration) return; // Completely off-timeline (past end)
 
             const renderEnd = Math.min(seg.end, timelineDuration);
@@ -840,18 +825,9 @@
 
             const el = document.createElement('div');
             el.className = 'segment-overlay';
-            if (seg.removed) el.classList.add('removed');
             if (idx === selectedSegIdx) el.classList.add('selected');
             el.style.left = leftPct + '%';
             el.style.width = widthPct + '%';
-
-            // "REMOVED" label for removed segments
-            if (seg.removed) {
-                const label = document.createElement('span');
-                label.className = 'segment-removed-label';
-                label.textContent = 'REMOVED';
-                el.appendChild(label);
-            }
 
             // Tooltip with time range
             const tooltip = document.createElement('span');
@@ -908,11 +884,9 @@
 
         // Selected segment info
         const hasSelection = selectedSegIdx !== null;
-        const isSelectedRemoved = hasSelection && (removedFlags[selectedSegIdx] || false);
 
         // Buttons
-        removeSectionBtn.style.display = (hasSelection && !isSelectedRemoved) ? '' : 'none';
-        restoreSectionBtn.style.display = (hasSelection && isSelectedRemoved) ? '' : 'none';
+        removeSectionBtn.style.display = hasSelection ? '' : 'none';
         deselectBtn.style.display = hasSelection ? '' : 'none';
         resetAllBtn.style.display = (hasAnySplit || hasAnyRemoved) ? '' : 'none';
 
@@ -920,11 +894,7 @@
         if (hasSelection) {
             const seg = segments[selectedSegIdx];
             const dur = formatDuration(seg.end - seg.start);
-            if (isSelectedRemoved) {
-                editorInfo.textContent = `Selected removed section (${dur}) — click "Restore" to bring it back`;
-            } else {
-                editorInfo.textContent = `Selected section (${dur}) — click "Remove" to cut it out`;
-            }
+            editorInfo.textContent = `Selected section (${dur}) — click "Remove" to cut it out`;
         } else if (hasAnyRemoved) {
             const totalRemoved = segments.filter(s => s.removed).reduce((sum, s) => sum + (s.end - s.start), 0);
             const remaining = videoDuration - totalRemoved;
