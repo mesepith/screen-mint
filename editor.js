@@ -202,6 +202,13 @@
                 currentAppTime = 0;
                 videoPlayer.currentTime = 0;
             }
+
+            // Pre-warm AudioContext and eagerly start audio BEFORE video play
+            // This eliminates the 1-3 frame delay from waiting for play event → RAF → sync
+            ensureAudioContextReady().then(() => {
+                syncOverlayAudio(currentAppTime);
+            });
+
             if (currentAppTime < videoDuration) {
                 stopVirtualPlayback();
                 videoPlayer.play();
@@ -353,6 +360,42 @@
 
 
     // ── Progress & Playhead ───────────────────────────────────────
+    let videoSyncRAF = null;
+    function startVideoSyncLoop() {
+        if (!isAppPlaying || isVirtualPlaying) return;
+
+        // Sync audio at 60fps instead of relying on slow timeupdate
+        if (videoDuration > 0 && !videoPlayer.paused) {
+            syncOverlayAudio(videoPlayer.currentTime);
+        }
+
+        videoSyncRAF = requestAnimationFrame(startVideoSyncLoop);
+    }
+
+    function stopVideoSyncLoop() {
+        if (videoSyncRAF) {
+            cancelAnimationFrame(videoSyncRAF);
+            videoSyncRAF = null;
+        }
+    }
+
+    videoPlayer.addEventListener('play', () => {
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = 'block';
+        playOverlay.classList.add('hidden');
+        videoToolbar.classList.add('hidden');
+        startVideoSyncLoop();
+    });
+
+    videoPlayer.addEventListener('pause', () => {
+        stopVideoSyncLoop();
+        if (!isVirtualPlaying && !isAppPlaying) {
+            playIcon.style.display = 'block';
+            pauseIcon.style.display = 'none';
+            playOverlay.classList.remove('hidden');
+        }
+    });
+
     videoPlayer.addEventListener('timeupdate', () => {
         if (isVirtualPlaying || isDraggingPlayhead) return; // Prevent conflicts
 
@@ -381,8 +424,6 @@
             // Render overlay preview & update lane playheads
             renderOverlayPreview(currentAppTime);
             updateLanePlayheads(pct);
-            // Sync overlay audio playback
-            if (!videoPlayer.paused) syncOverlayAudio(currentAppTime);
         }
         updateTimeDisplay();
     });
@@ -1480,6 +1521,10 @@
                     track.items.push(item);
                     // Cache audio element
                     overlayAudioCache[id] = audio;
+                    // Pre-warm AudioContext so it's ready at play time (avoids suspended state delay)
+                    ensureAudioContextReady();
+                    // Preload decoded buffer immediately
+                    loadAudioBuffer(id, ev.target.result);
 
                     updateTimelineDuration();
 
@@ -1544,6 +1589,12 @@
             const audio = new Audio();
             audio.src = item.audioSrc;
             overlayAudioCache[newId] = audio;
+            // Eagerly share/load the audio buffer for precise sync
+            if (overlayAudioBuffers[item.id]) {
+                overlayAudioBuffers[newId] = overlayAudioBuffers[item.id];
+            } else {
+                loadAudioBuffer(newId, item.audioSrc);
+            }
         }
 
         // For image overlays, cache the same image for the new item
@@ -2364,40 +2415,117 @@
         }
     }
 
-    // ── Audio Overlay Playback Sync ───────────────────────────────
+    // ── Web Audio API based Overlay Audio Playback Sync ─────────────
+    let editorAudioCtx = null;
+    let audioCtxReady = false; // true once context is running (not suspended)
+    const overlayAudioBuffers = {}; // id -> AudioBuffer
+    const activeAudioNodes = new Map(); // id -> { sourceNode, gainNode, expectedTime }
+
+    // Ensure AudioContext exists and is in 'running' state
+    async function ensureAudioContextReady() {
+        if (!editorAudioCtx) {
+            editorAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (editorAudioCtx.state === 'suspended') {
+            await editorAudioCtx.resume();
+        }
+        audioCtxReady = true;
+    }
+
+    async function loadAudioBuffer(id, url) {
+        await ensureAudioContextReady();
+        if (overlayAudioBuffers[id]) return overlayAudioBuffers[id];
+
+        try {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await editorAudioCtx.decodeAudioData(arrayBuffer);
+            overlayAudioBuffers[id] = audioBuffer;
+            return audioBuffer;
+        } catch (e) {
+            console.error('Failed to load audio buffer', e);
+            return null;
+        }
+    }
+
     function syncOverlayAudio(currentTime) {
         const shouldBeActive = new Set();
-        const shouldPlay = isAppPlaying; // Only play if video playback is active
+        const shouldPlay = isAppPlaying;
+
+        // If AudioContext isn't ready yet, kick off initialization (non-blocking)
+        // Audio will start on the next sync cycle once the context is running
+        if (shouldPlay && !audioCtxReady) {
+            ensureAudioContextReady();
+        }
+
+        // Don't try to start audio nodes if context isn't ready
+        if (!editorAudioCtx || editorAudioCtx.state !== 'running') {
+            return;
+        }
 
         for (const track of overlayTracks) {
             for (const item of track.items) {
                 if (item.type !== 'audio') continue;
-                const inRange = currentTime >= item.start && currentTime < item.start + item.duration;
 
-                if (inRange && shouldPlay) {
+                // Fire async load if not cached (doesn't block)
+                if (!overlayAudioBuffers[item.id]) {
+                    loadAudioBuffer(item.id, item.audioSrc);
+                }
+
+                const audioStartTime = item.start;
+                const audioEndTime = item.start + item.duration;
+                const inRange = currentTime >= audioStartTime && currentTime < audioEndTime;
+
+                if (inRange && shouldPlay && overlayAudioBuffers[item.id]) {
                     shouldBeActive.add(item.id);
-
-                    let audio = overlayAudioCache[item.id];
-                    if (!audio) {
-                        audio = new Audio(item.audioSrc);
-                        overlayAudioCache[item.id] = audio;
-                    }
-
-                    // Set volume
-                    audio.volume = (item.volume != null ? item.volume : 100) / 100;
 
                     const playbackOffset = currentTime - item.start;
                     const expectedTime = (item.audioOffset || 0) + playbackOffset;
+                    const volume = (item.volume != null ? item.volume : 100) / 100;
 
                     if (!activeAudioOverlays.has(item.id)) {
                         // Start playing this audio
-                        audio.currentTime = Math.min(expectedTime, audio.duration || expectedTime);
-                        audio.play().catch(() => { }); // Ignore autoplay policy errors
+                        const source = editorAudioCtx.createBufferSource();
+                        source.buffer = overlayAudioBuffers[item.id];
+
+                        const gain = editorAudioCtx.createGain();
+                        gain.gain.value = volume;
+
+                        source.connect(gain);
+                        gain.connect(editorAudioCtx.destination);
+
+                        // Schedule with a tiny look-ahead (5ms) so audio hardware has time
+                        // to prepare output — prevents first few ms from being cut off
+                        const startWhen = editorAudioCtx.currentTime + 0.005;
+                        source.start(startWhen, expectedTime);
+
+                        activeAudioNodes.set(item.id, { sourceNode: source, gainNode: gain, lastExpectedTime: expectedTime, systemTimeStart: startWhen });
                         activeAudioOverlays.add(item.id);
                     } else {
-                        // Already playing — correct drift if > 0.3s off
-                        if (Math.abs(audio.currentTime - expectedTime) > 0.3) {
-                            audio.currentTime = Math.min(expectedTime, audio.duration || expectedTime);
+                        // Update volume continuously
+                        const nodeInfo = activeAudioNodes.get(item.id);
+                        if (nodeInfo) {
+                            nodeInfo.gainNode.gain.value = volume;
+
+                            // Drift correction logic. 
+                            // expectedTime = virtual app time offset
+                            // actual node play time = context.currentTime - systemTimeStart + initialOffset
+                            const actualNodePlayTime = (editorAudioCtx.currentTime - nodeInfo.systemTimeStart) + nodeInfo.lastExpectedTime;
+
+                            if (Math.abs(actualNodePlayTime - expectedTime) > 0.3) {
+                                // Way out of sync (e.g., user dragged playhead backwards while playing)
+                                nodeInfo.sourceNode.stop();
+
+                                const source = editorAudioCtx.createBufferSource();
+                                source.buffer = overlayAudioBuffers[item.id];
+                                source.connect(nodeInfo.gainNode);
+                                const startWhen = editorAudioCtx.currentTime + 0.005;
+                                source.start(startWhen, expectedTime);
+
+                                nodeInfo.sourceNode = source;
+                                nodeInfo.systemTimeStart = startWhen;
+                                nodeInfo.lastExpectedTime = expectedTime;
+                            }
                         }
                     }
                 }
@@ -2407,11 +2535,13 @@
         // Stop audio overlays that are no longer in range (or shouldn't be playing)
         for (const id of activeAudioOverlays) {
             if (!shouldBeActive.has(id)) {
-                const audio = overlayAudioCache[id];
-                if (audio) {
-                    audio.pause();
-                    audio.currentTime = 0;
+                const nodeInfo = activeAudioNodes.get(id);
+                if (nodeInfo && nodeInfo.sourceNode) {
+                    try { nodeInfo.sourceNode.stop(); } catch (e) { }
+                    try { nodeInfo.sourceNode.disconnect(); } catch (e) { }
+                    try { nodeInfo.gainNode.disconnect(); } catch (e) { }
                 }
+                activeAudioNodes.delete(id);
                 activeAudioOverlays.delete(id);
             }
         }
@@ -2419,11 +2549,13 @@
 
     function stopAllOverlayAudio() {
         for (const id of activeAudioOverlays) {
-            const audio = overlayAudioCache[id];
-            if (audio) {
-                audio.pause();
-                audio.currentTime = 0;
+            const nodeInfo = activeAudioNodes.get(id);
+            if (nodeInfo && nodeInfo.sourceNode) {
+                try { nodeInfo.sourceNode.stop(); } catch (e) { }
+                try { nodeInfo.sourceNode.disconnect(); } catch (e) { }
+                try { nodeInfo.gainNode.disconnect(); } catch (e) { }
             }
+            activeAudioNodes.delete(id);
         }
         activeAudioOverlays.clear();
     }
