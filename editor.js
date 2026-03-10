@@ -1954,6 +1954,14 @@
                     // Only show cut menu if user clicked (didn't drag)
                     if (dx < 5 && dy < 5) {
                         e.stopPropagation();
+
+                        // Clear dragging state since we're stopping propagation to document
+                        if (typeof draggingOverlayItem !== 'undefined' && draggingOverlayItem) {
+                            draggingOverlayItem = null;
+                            document.body.style.cursor = '';
+                            document.body.style.userSelect = '';
+                        }
+
                         // Calculate the time at click position
                         const rect = lane.getBoundingClientRect();
                         const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
