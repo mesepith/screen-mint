@@ -22,11 +22,14 @@ async function startRecording() {
         // In an offscreen document created with DISPLAY_MEDIA reason,
         // Chrome shows its built-in screen/window/tab picker automatically.
         // No need for chrome.desktopCapture or chromeMediaSource constraints.
+        // Detect macOS. macOS does not support system audio capture via getDisplayMedia
+        // and requesting it often causes Chrome bugs (AbortError, NotReadableError) or long delays.
+        const isMac = navigator.userAgent.includes('Mac OS X');
+
+        // Only request audio on Windows/ChromeOS
         const stream = await navigator.mediaDevices.getDisplayMedia({
-            video: {
-                displaySurface: 'monitor' // prefer full screen, user can still pick window/tab
-            },
-            audio: true // request system audio (works on Windows/ChromeOS, not macOS)
+            video: { displaySurface: 'monitor' },
+            audio: !isMac
         });
 
         console.log('Got display media stream, tracks:', stream.getTracks().map(t => t.kind));
@@ -129,13 +132,18 @@ async function startRecording() {
 
         // NotAllowedError = user denied/cancelled the picker
         const userCancelled = error.name === 'NotAllowedError';
+        let errorMessage = `${error.name}: ${error.message}`;
+
+        if (error.name === 'NotReadableError') {
+            errorMessage = 'Could not start video. If you are on macOS, please go to System Settings > Privacy & Security > Screen Recording, enable Chrome, and restart your browser.';
+        } else if (userCancelled) {
+            errorMessage = 'User cancelled screen selection';
+        }
 
         chrome.runtime.sendMessage({
             type: 'recording-failed',
             target: 'background',
-            error: userCancelled
-                ? 'User cancelled screen selection'
-                : `${error.name}: ${error.message}`
+            error: errorMessage
         });
     }
 }
