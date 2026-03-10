@@ -1024,61 +1024,115 @@
                     source.connect(dest);
                     // Do NOT connect to audioCtx.destination to prevent it from playing aloud to speakers
 
-                    // Connect overlay audio items
-                    const exportAudioElements = [];
+                    // Connect overlay audio items using AudioBufferSourceNode
+                    const exportAudioItems = [];
                     for (const track of overlayTracks) {
                         for (const item of track.items) {
-                            if (item.type !== 'audio' || !item.audioSrc) continue;
-                            const audioEl = new Audio(item.audioSrc);
-                            audioEl.crossOrigin = 'anonymous';
-                            audioEl.volume = (item.volume != null ? item.volume : 100) / 100;
-                            try {
-                                const audioSource = audioCtx.createMediaElementSource(audioEl);
-                                audioSource.connect(dest);
-                                // Do NOT connect to audioCtx.destination
-                                exportAudioElements.push({
-                                    el: audioEl,
-                                    start: item.start,
-                                    duration: item.duration,
-                                    audioOffset: item.audioOffset || 0
-                                });
-                            } catch (_ae) { /* skip if fails */ }
+                            if (item.type !== 'audio' || !item.audioSrc || !overlayAudioBuffers[item.id]) continue;
+                            exportAudioItems.push({
+                                id: item.id,
+                                start: item.start,
+                                duration: item.duration,
+                                audioOffset: item.audioOffset || 0,
+                                volume: (item.volume != null ? item.volume : 100) / 100,
+                                buffer: overlayAudioBuffers[item.id]
+                            });
                         }
                     }
 
                     dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
 
                     // Use dynamic sync instead of setTimeout
-                    // We store these so we can clean them up in finishRecording
-                    canvasStream._exportAudioCleanup = () => {
-                        exportAudioElements.forEach(ea => { try { ea.el.pause(); } catch (_) { } });
-                    };
+                    const activeExportAudioNodes = new Map(); // id -> { sourceNode, gainNode, lastExpectedTime, systemTimeStart }
+                    const activeExportAudioIds = new Set();
 
-                    // Implement frame-by-frame audio sync
+                    // Implement frame-by-frame audio sync using Web Audio buffers
                     canvasStream._syncExportAudio = (appTime) => {
-                        for (const ea of exportAudioElements) {
-                            if (appTime >= ea.start && appTime < ea.start + ea.duration) {
-                                if (ea.el.paused) {
-                                    ea.el.currentTime = ea.audioOffset + (appTime - ea.start);
-                                    ea.el.play().catch(() => { });
+                        const shouldBeActive = new Set();
+
+                        for (const ea of exportAudioItems) {
+                            const inRange = appTime >= ea.start && appTime < ea.start + ea.duration;
+                            if (inRange) {
+                                shouldBeActive.add(ea.id);
+
+                                const playbackOffset = appTime - ea.start;
+                                const expectedTime = ea.audioOffset + playbackOffset;
+
+                                if (!activeExportAudioIds.has(ea.id)) {
+                                    // Start playing
+                                    const source = audioCtx.createBufferSource();
+                                    source.buffer = ea.buffer;
+
+                                    const gain = audioCtx.createGain();
+                                    gain.gain.value = ea.volume;
+
+                                    source.connect(gain);
+                                    gain.connect(dest); // Connect to export destination not speakers
+
+                                    const startWhen = audioCtx.currentTime + 0.005;
+                                    source.start(startWhen, expectedTime);
+
+                                    activeExportAudioNodes.set(ea.id, {
+                                        sourceNode: source,
+                                        gainNode: gain,
+                                        lastExpectedTime: expectedTime,
+                                        systemTimeStart: startWhen
+                                    });
+                                    activeExportAudioIds.add(ea.id);
                                 } else {
-                                    // Drift correction
-                                    const expectedTime = ea.audioOffset + (appTime - ea.start);
-                                    if (Math.abs(ea.el.currentTime - expectedTime) > 0.15) {
-                                        ea.el.currentTime = expectedTime;
+                                    const nodeInfo = activeExportAudioNodes.get(ea.id);
+                                    if (nodeInfo) {
+                                        nodeInfo.gainNode.gain.value = ea.volume;
+
+                                        const actualNodePlayTime = (audioCtx.currentTime - nodeInfo.systemTimeStart) + nodeInfo.lastExpectedTime;
+
+                                        // Drift correction threshold slightly higher for export
+                                        if (Math.abs(actualNodePlayTime - expectedTime) > 0.15) {
+                                            try { nodeInfo.sourceNode.stop(); } catch (e) { }
+
+                                            const source = audioCtx.createBufferSource();
+                                            source.buffer = ea.buffer;
+                                            source.connect(nodeInfo.gainNode);
+
+                                            const startWhen = audioCtx.currentTime + 0.005;
+                                            source.start(startWhen, expectedTime);
+
+                                            nodeInfo.sourceNode = source;
+                                            nodeInfo.systemTimeStart = startWhen;
+                                            nodeInfo.lastExpectedTime = expectedTime;
+                                        }
                                     }
                                 }
-                            } else {
-                                if (!ea.el.paused) {
-                                    ea.el.pause();
+                            }
+                        }
+
+                        // Cleanup inactive nodes
+                        for (const id of activeExportAudioIds) {
+                            if (!shouldBeActive.has(id)) {
+                                const nodeInfo = activeExportAudioNodes.get(id);
+                                if (nodeInfo && nodeInfo.sourceNode) {
+                                    try { nodeInfo.sourceNode.stop(); } catch (e) { }
+                                    try { nodeInfo.sourceNode.disconnect(); } catch (e) { }
+                                    try { nodeInfo.gainNode.disconnect(); } catch (e) { }
                                 }
+                                activeExportAudioNodes.delete(id);
+                                activeExportAudioIds.delete(id);
                             }
                         }
                     };
 
                     // Store for cleanup
                     canvasStream._exportAudioCleanup = () => {
-                        exportAudioElements.forEach(ea => { try { ea.el.pause(); } catch (_) { } });
+                        for (const id of activeExportAudioIds) {
+                            const nodeInfo = activeExportAudioNodes.get(id);
+                            if (nodeInfo && nodeInfo.sourceNode) {
+                                try { nodeInfo.sourceNode.stop(); } catch (e) { }
+                                try { nodeInfo.sourceNode.disconnect(); } catch (e) { }
+                                try { nodeInfo.gainNode.disconnect(); } catch (e) { }
+                            }
+                        }
+                        activeExportAudioNodes.clear();
+                        activeExportAudioIds.clear();
                     };
                 } catch (_e) { /* no audio */ }
 
