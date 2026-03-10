@@ -969,7 +969,12 @@
                                 const audioSource = audioCtx.createMediaElementSource(audioEl);
                                 audioSource.connect(dest);
                                 // Do NOT connect to audioCtx.destination
-                                exportAudioElements.push({ el: audioEl, start: item.start, duration: item.duration });
+                                exportAudioElements.push({
+                                    el: audioEl,
+                                    start: item.start,
+                                    duration: item.duration,
+                                    audioOffset: item.audioOffset || 0
+                                });
                             } catch (_ae) { /* skip if fails */ }
                         }
                     }
@@ -982,7 +987,7 @@
                     for (const ea of exportAudioElements) {
                         const delayMs = Math.max(0, ea.start * 1000);
                         const tid = setTimeout(() => {
-                            ea.el.currentTime = 0;
+                            ea.el.currentTime = ea.audioOffset;
                             ea.el.play().catch(() => { });
                             // Stop after duration
                             const stopTid = setTimeout(() => {
@@ -2381,15 +2386,16 @@
                     // Set volume
                     audio.volume = (item.volume != null ? item.volume : 100) / 100;
 
-                    const audioOffset = currentTime - item.start;
+                    const playbackOffset = currentTime - item.start;
+                    const expectedTime = (item.audioOffset || 0) + playbackOffset;
+
                     if (!activeAudioOverlays.has(item.id)) {
                         // Start playing this audio
-                        audio.currentTime = Math.min(audioOffset, audio.duration || audioOffset);
+                        audio.currentTime = Math.min(expectedTime, audio.duration || expectedTime);
                         audio.play().catch(() => { }); // Ignore autoplay policy errors
                         activeAudioOverlays.add(item.id);
                     } else {
                         // Already playing — correct drift if > 0.3s off
-                        const expectedTime = audioOffset;
                         if (Math.abs(audio.currentTime - expectedTime) > 0.3) {
                             audio.currentTime = Math.min(expectedTime, audio.duration || expectedTime);
                         }
