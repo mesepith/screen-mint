@@ -93,7 +93,8 @@
     function saveUndoState() {
         undoStack.push({
             splitPoints: [...splitPoints],
-            removedFlags: [...removedFlags]
+            removedFlags: [...removedFlags],
+            overlayTracks: JSON.parse(JSON.stringify(overlayTracks))
         });
         if (undoStack.length > 20) undoStack.shift(); // limit
     }
@@ -106,9 +107,26 @@
         const state = undoStack.pop();
         splitPoints = state.splitPoints;
         removedFlags = state.removedFlags;
+        // Restore overlay tracks if saved
+        if (state.overlayTracks) {
+            // Stop any currently playing audio before restoring
+            stopAllOverlayAudio();
+            overlayTracks = state.overlayTracks;
+            // Rebuild audio buffer cache for restored audio items
+            for (const track of overlayTracks) {
+                for (const item of track.items) {
+                    if (item.type === 'audio' && item.audioSrc && !overlayAudioBuffers[item.id]) {
+                        loadAudioBuffer(item.id, item.audioSrc);
+                    }
+                }
+            }
+        }
         selectedSegIdx = null;
         renderTimeline();
         updateControls();
+        renderOverlayTracks();
+        renderOverlayPreview(currentAppTime);
+        updateTimelineDuration();
         showToast('↩️', 'Undone');
     }
 
@@ -1644,6 +1662,7 @@
             if (!pendingCutAction) return;
 
             if (pendingCutAction.type === 'overlay') {
+                saveUndoState();
                 splitOverlayItem(pendingCutAction.trackId, pendingCutAction.itemId, pendingCutAction.time);
             } else if (pendingCutAction.type === 'timeline') {
                 addSplit(pendingCutAction.time);
@@ -1662,6 +1681,7 @@
             if (!pendingCutAction) return;
 
             if (pendingCutAction.type === 'overlay') {
+                saveUndoState();
                 removeOverlayItem(pendingCutAction.trackId, pendingCutAction.itemId);
             } else if (pendingCutAction.type === 'timeline') {
                 // Find segment index from time
@@ -1943,6 +1963,7 @@
                 delBtn.textContent = '×';
                 delBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    saveUndoState();
                     removeOverlayItem(track.id, item.id);
                 });
                 el.appendChild(delBtn);
