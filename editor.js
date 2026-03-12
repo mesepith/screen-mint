@@ -697,9 +697,8 @@
             ctx.save();
             ctx.beginPath();
             
-            // In non-ripple mode, the entire timeline width is valid video
-            // We just need to stop clipping when we reach the end of the video timeline duration.
-            const compressedVideoEnd = timelineDuration > videoDuration ? videoDuration : timelineDuration;
+            // Clip to the compressed video width on the timeline
+            const compressedVideoEnd = getCompressedVideoDuration();
             const compressedVideoWidth = (compressedVideoEnd / timelineDuration) * w;
             ctx.rect(0, 0, compressedVideoWidth, h);
             ctx.clip();
@@ -709,7 +708,7 @@
                 const barTimeTimeline = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
                 if (barTimeTimeline > compressedVideoEnd) break;
                 
-                const barTimeVideo = barTimeTimeline; // 1:1 mapping now
+                const barTimeVideo = timelineToVideoTime(barTimeTimeline);
                 
                 // Find the closest thumbnail for `barTimeVideo`
                 let closestThumb = videoThumbnails[0];
@@ -722,7 +721,6 @@
                     }
                 }
                 
-                // Draw width might be curtailed at the edge of the canvas, but clip() handles the gaps
                 let drawWidth = thumbWidth;
                 if (x + thumbWidth > w) {
                     drawWidth = w - x;
@@ -751,10 +749,10 @@
 
             // Map bar position to timeline time, then to video time
             const tTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
-            const vTime = tTime; // 1:1 mapping now
+            const vTime = timelineToVideoTime(tTime);
 
-            // Don't draw bars past the video content
-            if (tTime > videoDuration) continue;
+            // Don't draw bars past the compressed video content
+            if (tTime > getCompressedVideoDuration()) continue;
 
             const noise1 = Math.sin(i * 0.15) * 0.3;
             const noise2 = Math.sin(i * 0.4 + 1.5) * 0.2;
@@ -789,19 +787,59 @@
 
     // ── Time Mappers ─────────────────────────────
     
-    // With ripple edit disabled, timeline time and video time are 1:1
+    // Map video time → timeline time (collapse removed segments)
     function videoToTimelineTime(vTime) {
-        return vTime || 0;
+        if (!vTime) return 0;
+        const segments = typeof getSegments === 'function' ? getSegments() : [];
+        if (segments.length === 0) return vTime;
+        
+        let tTime = 0;
+        for (const seg of segments) {
+            if (seg.removed) {
+                // Skip removed segments entirely
+                if (vTime >= seg.end) continue;
+                if (vTime >= seg.start) return tTime; // Inside removed segment
+                return tTime;
+            } else {
+                if (vTime <= seg.start) return tTime;
+                if (vTime <= seg.end) return tTime + (vTime - seg.start);
+                tTime += (seg.end - seg.start);
+            }
+        }
+        return tTime;
     }
 
-    // With ripple edit disabled, timeline time and video time are 1:1
+    // Map timeline time → video time (expand back to original)
     function timelineToVideoTime(tTime) {
-        return tTime || 0;
+        if (!tTime) return 0;
+        const segments = typeof getSegments === 'function' ? getSegments() : [];
+        if (segments.length === 0) return tTime;
+        
+        let remaining = tTime;
+        for (const seg of segments) {
+            if (seg.removed) continue; // Skip removed segments
+            const segDur = seg.end - seg.start;
+            if (remaining <= segDur) return seg.start + remaining;
+            remaining -= segDur;
+        }
+        // Past the end — return last kept segment end
+        for (let i = segments.length - 1; i >= 0; i--) {
+            if (!segments[i].removed) return segments[i].end;
+        }
+        return 0;
     }
     
-    // Calculate the total duration of kept video segments (Now disabled for non-shifting timeline)
+    // Calculate the total duration of kept video segments
     function getCompressedVideoDuration() {
-        return videoDuration || 0;
+        if (!videoDuration) return 0;
+        let total = 0;
+        const segments = typeof getSegments === 'function' ? getSegments() : [];
+        for (const seg of segments) {
+            if (!seg.removed) {
+                total += (seg.end - seg.start);
+            }
+        }
+        return total;
     }
 
     function getEffectiveVideoEnd() {
@@ -992,6 +1030,8 @@
         // we must scale them back relative to timelineDuration for correct rendering
 
         segments.forEach((seg, idx) => {
+            if (seg.removed) return; // Completely hide removed segments from timeline
+            
             const tStart = videoToTimelineTime(seg.start);
             if (tStart >= timelineDuration) return; // Completely off-timeline (past end)
 
@@ -1004,14 +1044,13 @@
             const el = document.createElement('div');
             el.className = 'segment-overlay';
             if (idx === selectedSegIdx) el.classList.add('selected');
-            if (seg.removed) el.classList.add('removed'); // Add a class to hide or style removed segments
             el.style.left = leftPct + '%';
             el.style.width = widthPct + '%';
 
             // Tooltip with time range
             const tooltip = document.createElement('span');
             tooltip.className = 'segment-tooltip';
-            tooltip.textContent = `${seg.removed ? '[REMOVED] ' : ''}${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
+            tooltip.textContent = `${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
             el.appendChild(tooltip);
 
             // Click to select this segment (but not during playhead drag)
