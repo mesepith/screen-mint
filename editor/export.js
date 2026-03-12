@@ -35,7 +35,6 @@ downloadBtn.addEventListener('click', async () => {
         const editedBlob = await encodeSegments(videoBlob, allSegments, exportTimelineEnd, (progress) => {
             processingSubtext.textContent = progress;
         });
-
         const ext = videoFileName.split('.').pop();
         const baseName = videoFileName.replace('.' + ext, '');
         const newFileName = `${baseName}_edited.${ext}`;
@@ -57,6 +56,27 @@ discardBtn.addEventListener('click', async () => {
         setTimeout(() => window.close(), 1200);
     }
 });
+
+function syncOverlayVideosForExport(currentTime) {
+    for (const track of overlayTracks) {
+        for (const item of track.items) {
+            if (item.type === 'video') {
+                const vid = overlayVideoCache[item.id];
+                if (!vid) continue;
+                const inRange = currentTime >= item.start && currentTime < item.start + item.duration;
+                if (inRange) {
+                    if (vid.paused) vid.play().catch(() => { });
+                    const expectedTime = (item.videoOffset || 0) + (currentTime - item.start);
+                    if (Math.abs(vid.currentTime - expectedTime) > 0.2) {
+                        vid.currentTime = expectedTime;
+                    }
+                } else {
+                    if (!vid.paused) vid.pause();
+                }
+            }
+        }
+    }
+}
 
 function encodeSegments(blob, segments, exportDuration, onProgress) {
     return new Promise((resolve, reject) => {
@@ -106,12 +126,13 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 const exportAudioItems = [];
                 for (const track of overlayTracks) {
                     for (const item of track.items) {
-                        if (item.type !== 'audio' || !item.audioSrc || !overlayAudioBuffers[item.id]) continue;
+                        if ((item.type !== 'audio' && item.type !== 'video') || (!item.audioSrc && !item.videoSrc) || !overlayAudioBuffers[item.id]) continue;
+
                         exportAudioItems.push({
                             id: item.id,
                             start: item.start,
                             duration: item.duration,
-                            audioOffset: item.audioOffset || 0,
+                            audioOffset: (item.type === 'video' ? item.videoOffset : item.audioOffset) || 0,
                             volume: (item.volume != null ? item.volume : 100) / 100,
                             buffer: overlayAudioBuffers[item.id]
                         });
@@ -119,7 +140,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 }
 
                 dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
-
                 const activeExportAudioNodes = new Map();
                 const activeExportAudioIds = new Set();
 
@@ -142,7 +162,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
                                 const startWhen = audioCtx.currentTime + 0.005;
                                 source.start(startWhen, expectedTime);
-
                                 activeExportAudioNodes.set(ea.id, {
                                     sourceNode: source, gainNode: gain, lastExpectedTime: expectedTime, systemTimeStart: startWhen
                                 });
@@ -155,6 +174,7 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
                                     if (Math.abs(actualNodePlayTime - expectedTime) > 0.15) {
                                         try { nodeInfo.sourceNode.stop(); } catch (e) { }
+
                                         const source = audioCtx.createBufferSource();
                                         source.buffer = ea.buffer;
                                         source.connect(nodeInfo.gainNode);
@@ -208,7 +228,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
             recorder = new MediaRecorder(canvasStream, recOptions);
             chunks = [];
-
             recorder.ondataavailable = (e) => {
                 if (e.data && e.data.size > 0) chunks.push(e.data);
             };
@@ -219,7 +238,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 const finalBlob = new Blob(chunks, { type: recOptions.mimeType });
                 resolve(finalBlob);
             };
-
             recorder.onerror = () => {
                 if (animFrameId) cancelAnimationFrame(animFrameId);
                 URL.revokeObjectURL(url);
@@ -265,10 +283,8 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             onProgress(`Encoding segment ${idx + 1} of ${segments.length}…`);
 
             const targetTime = segments[idx].start;
-
             if (Math.abs(tempVideo.currentTime - targetTime) < 0.05) {
                 seeking = false;
-
                 if (recorder && recorder.state === 'inactive') {
                     recorder.start(100);
                 } else if (recorder && recorder.state === 'paused') {
@@ -344,7 +360,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             virtualRecordingTime += deltaSec;
             let totalVideoWritten = videoDuration;
             const currentExtAppTime = totalVideoWritten + (virtualRecordingTime - totalVideoWritten);
-
             if (currentExtAppTime >= exportDuration) {
                 finishRecording();
                 return;
@@ -354,6 +369,7 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             try {
+                syncOverlayVideosForExport(currentExtAppTime);
                 drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, currentExtAppTime);
             } catch (e) { console.warn('Overlay draw error:', e); }
 
@@ -389,6 +405,7 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             }
 
             try {
+                syncOverlayVideosForExport(tempVideo.currentTime);
                 drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, tempVideo.currentTime);
             } catch (e) { console.warn('Overlay draw error:', e); }
 

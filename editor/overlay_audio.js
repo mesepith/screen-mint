@@ -31,14 +31,16 @@ function syncOverlayAudio(currentTime) {
     const shouldPlay = isAppPlaying;
 
     if (shouldPlay && !audioCtxReady) ensureAudioContextReady();
-
     if (!editorAudioCtx || editorAudioCtx.state !== 'running') return;
 
     for (const track of overlayTracks) {
         for (const item of track.items) {
-            if (item.type !== 'audio') continue;
+            if (item.type !== 'audio' && item.type !== 'video') continue;
 
-            if (!overlayAudioBuffers[item.id]) loadAudioBuffer(item.id, item.audioSrc);
+            const srcUrl = item.audioSrc || item.videoSrc;
+            if (!srcUrl) continue;
+
+            if (!overlayAudioBuffers[item.id]) loadAudioBuffer(item.id, srcUrl);
 
             const audioStartTime = item.start;
             const audioEndTime = item.start + item.duration;
@@ -47,7 +49,8 @@ function syncOverlayAudio(currentTime) {
             if (inRange && shouldPlay && overlayAudioBuffers[item.id]) {
                 shouldBeActive.add(item.id);
                 const playbackOffset = currentTime - item.start;
-                const expectedTime = (item.audioOffset || 0) + playbackOffset;
+                const existingOffset = item.type === 'video' ? (item.videoOffset || 0) : (item.audioOffset || 0);
+                const expectedTime = existingOffset + playbackOffset;
                 const volume = (item.volume != null ? item.volume : 100) / 100;
 
                 if (!activeAudioOverlays.has(item.id)) {
@@ -62,7 +65,6 @@ function syncOverlayAudio(currentTime) {
 
                     const startWhen = editorAudioCtx.currentTime + 0.005;
                     source.start(startWhen, expectedTime);
-
                     activeAudioNodes.set(item.id, { sourceNode: source, gainNode: gain, lastExpectedTime: expectedTime, systemTimeStart: startWhen });
                     activeAudioOverlays.add(item.id);
                 } else {
@@ -70,6 +72,7 @@ function syncOverlayAudio(currentTime) {
                     if (nodeInfo) {
                         nodeInfo.gainNode.gain.value = volume;
                         const actualNodePlayTime = (editorAudioCtx.currentTime - nodeInfo.systemTimeStart) + nodeInfo.lastExpectedTime;
+
                         if (Math.abs(actualNodePlayTime - expectedTime) > 0.3) {
                             nodeInfo.sourceNode.stop();
                             const source = editorAudioCtx.createBufferSource();

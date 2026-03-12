@@ -81,6 +81,7 @@ let editingOverlay = null;
 let draggingOverlayItem = null;
 let overlayImageCache = {};
 let overlayAudioCache = {};
+let overlayVideoCache = {};
 let activeAudioOverlays = new Set();
 
 // Playback State

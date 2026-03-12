@@ -54,7 +54,7 @@ function renderInteractionBoxes(activeItems, layerW, layerH) {
 
     for (const { trackId, item, measuredWidth, measuredHeight } of activeItems) {
         let itemW, itemH;
-        if (item.type === 'image') {
+        if (item.type === 'image' || item.type === 'video') {
             itemW = (item.imageWidth / 100) * layerW;
             itemH = (item.imageHeight / 100) * layerH;
         } else {
@@ -67,7 +67,6 @@ function renderInteractionBoxes(activeItems, layerW, layerH) {
 
         const boxId = `interaction-box-${trackId}-${item.id}`;
         let box = document.getElementById(boxId);
-
         if (!box && !skipRebuild) {
             box = document.createElement('div');
             box.id = boxId;
@@ -92,20 +91,21 @@ function renderInteractionBoxes(activeItems, layerW, layerH) {
                 document.body.style.cursor = 'move';
                 document.body.style.userSelect = 'none';
             });
-
             ['tl', 'tr', 'bl', 'br'].forEach(corner => {
                 const handle = document.createElement('div');
                 handle.className = `overlay-corner-handle ${corner}`;
                 handle.addEventListener('mousedown', (e) => {
                     e.preventDefault(); e.stopPropagation();
+
                     interactionDrag = {
                         trackId, itemId: item.id, type: 'corner', corner,
                         startX: e.clientX, startY: e.clientY,
                         origW: itemW, origH: itemH,
                         origImageW: item.imageWidth, origFontSize: item.fontSize,
                         origX: item.x, origY: item.y, layerW, layerH,
-                        aspectRatio: item.type === 'image' ? (item.imageHeight / item.imageWidth) : (itemH / itemW)
+                        aspectRatio: (item.type === 'image' || item.type === 'video') ? (item.imageHeight / item.imageWidth) : (itemH / itemW)
                     };
+
                     document.body.style.cursor = handle.style.cursor || 'nwse-resize';
                     document.body.style.userSelect = 'none';
                 });
@@ -144,12 +144,10 @@ function renderInteractionBoxes(activeItems, layerW, layerH) {
                     renderOverlayPreview(videoPlayer.currentTime);
                 }
             });
-
             slider.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 toolbarInteracting = true;
             });
-
             transparencyPanel.appendChild(slider);
             transparencyPanel.appendChild(valueLabel);
 
@@ -158,7 +156,6 @@ function renderInteractionBoxes(activeItems, layerW, layerH) {
                 transparencyBtn.classList.toggle('active');
                 transparencyPanel.classList.toggle('open');
             });
-
             toolbar.appendChild(transparencyBtn);
             toolbar.appendChild(transparencyPanel);
             box.appendChild(toolbar);
@@ -219,7 +216,6 @@ document.addEventListener('mousemove', (e) => {
         const deltaX = e.clientX - resizingOverlayItem.startX;
         const deltaTime = (deltaX / resizingOverlayItem.laneWidth) * timelineDuration;
         const minDuration = 0.2;
-
         if (resizingOverlayItem.edge === 'right') {
             let newDuration = resizingOverlayItem.origDuration + deltaTime;
             newDuration = Math.max(minDuration, newDuration);
@@ -234,7 +230,6 @@ document.addEventListener('mousemove', (e) => {
 
         const oldDuration = timelineDuration;
         updateTimelineDuration();
-
         if (oldDuration !== timelineDuration) {
             renderOverlayTracks();
         } else {
@@ -274,7 +269,7 @@ document.addEventListener('mousemove', (e) => {
             }
 
             const scale = Math.max(0.05, newWidthPx / interactionDrag.origW);
-            if (item.type === 'image') {
+            if (item.type === 'image' || item.type === 'video') {
                 item.imageWidth = interactionDrag.origImageW * scale;
                 item.imageHeight = interactionDrag.origImageW * scale * interactionDrag.aspectRatio;
             } else if (item.type === 'text') {
@@ -307,6 +302,7 @@ document.addEventListener('mouseup', () => {
             popoverY.value = Math.round(item.y);
         }
         interactionDrag = null;
+
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         renderOverlayPreview(videoPlayer.currentTime);

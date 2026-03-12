@@ -1417,7 +1417,14 @@ body::before {
   border: 1px solid rgba(245, 158, 11, 0.4);
 }
 
-.overlay-item-audio .audio-icon {
+/* Video overlay item */
+.overlay-item-video {
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.55), rgba(225, 29, 72, 0.55));
+  border: 1px solid rgba(236, 72, 153, 0.4);
+}
+
+.overlay-item-audio .audio-icon,
+.overlay-item-video .video-icon {
   margin-right: 3px;
   font-size: 0.7rem;
 }

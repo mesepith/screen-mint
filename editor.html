@@ -11,13 +11,11 @@
 
 <body>
 
-    <!-- Loading Screen -->
     <div class="loading-screen" id="loadingScreen">
         <div class="loading-spinner"></div>
         <div class="loading-text">Preparing your recording…</div>
     </div>
 
-    <!-- Processing Overlay -->
     <div class="processing-overlay" id="processingOverlay">
         <div class="processing-content">
             <div class="processing-spinner"></div>
@@ -26,14 +24,12 @@
         </div>
     </div>
 
-    <!-- Toast -->
     <div class="toast" id="toast">
         <span class="toast-icon"></span>
         <span class="toast-text"></span>
     </div>
 
     <div class="app">
-        <!-- Header -->
         <header class="header">
             <div class="header-left">
                 <div class="logo-icon">🎬</div>
@@ -47,7 +43,6 @@
                     <span class="badge-dot"></span>
                     <span id="recordingInfo">Ready</span>
                 </div>
-                <!-- Action Buttons -->
                 <div class="size-control"
                     style="display: flex; align-items: center; gap: 8px; margin-right: 16px; padding-right: 16px; border-right: 1px solid var(--border-color);">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="var(--text-secondary)">
@@ -73,7 +68,6 @@
     </div>
     </header>
 
-    <!-- Video Player -->
     <div class="video-container">
         <div class="video-toolbar hidden" id="videoToolbar">
             <button class="editor-btn btn-split" id="splitBtn"
@@ -92,7 +86,6 @@
             <div class="play-overlay" id="playOverlay" style="display:none !important"></div>
         </div>
 
-        <!-- Controls -->
         <div class="controls-bar">
             <button class="ctrl-btn" id="playPauseBtn" title="Play/Pause">
                 <svg id="playIcon" viewBox="0 0 24 24">
@@ -135,18 +128,14 @@
         </div>
     </div>
 
-    <!-- Overlay Tracks Section -->
     <div class="timeline-scroll-wrapper" id="timelineScrollWrapper">
         <div class="timeline-scroll-content" id="timelineScrollContent">
             <div class="overlay-tracks-section" id="overlayTracksSection">
                 <div class="overlay-tracks-container" id="overlayTracksContainer">
-                    <!-- Track rows will be rendered here by JS -->
                 </div>
             </div>
 
-            <!-- Editor Section -->
             <div class="editor-section" id="editorSection">
-                <!-- Unified Timeline -->
                 <div class="timeline" id="timeline">
                     <canvas class="timeline-waveform" id="timelineWaveform"></canvas>
                     <div class="timeline-segments-layer" id="timelineSegmentsLayer"></div>
@@ -154,7 +143,6 @@
                     <div class="timeline-playhead" id="timelinePlayhead"></div>
                 </div>
 
-                <!-- Time labels -->
                 <div class="timeline-labels">
                     <span class="timeline-label-time" id="timelineLabelStart">0:00.0</span>
                     <span class="timeline-label-time" id="timelineLabelEnd">0:00.0</span>
@@ -162,7 +150,6 @@
             </div>
         </div>
 
-        <!-- Editor Controls -->
         <div class="editor-controls" id="editorControls">
             <span class="editor-info" id="editorInfo"
                 style="margin-right: auto; font-size: 0.8rem; color: var(--text-muted);">Split the timeline, then click
@@ -192,7 +179,6 @@
         </button>
     </div>
 
-    <!-- Inline Track Menu (Hidden by default) -->
     <div class="inline-track-menu" id="inlineTrackMenu" style="display:none">
         <button class="inline-track-btn" id="inlineTextBtn">
             <svg viewBox="0 0 24 24">
@@ -210,9 +196,14 @@
                 <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
             </svg> Audio
         </button>
+        <button class="inline-track-btn" id="inlineVideoBtn">
+            <svg viewBox="0 0 24 24">
+                <path
+                    d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
+            </svg> Video
+        </button>
     </div>
 
-    <!-- Inline Cut Menu (Hidden by default) -->
     <div class="inline-cut-menu" id="inlineCutMenu" style="display:none">
         <button class="inline-cut-btn" id="inlineCutBtn">
             <svg viewBox="0 0 24 24">
@@ -229,7 +220,6 @@
         </button>
     </div>
 
-    <!-- Overlay Edit Popover -->
     <div class="overlay-edit-popover" id="overlayEditPopover" style="display:none">
         <div class="popover-header">
             <span class="popover-title">Edit Text Overlay</span>

@@ -20,15 +20,33 @@ function undo() {
 
     if (state.overlayTracks) {
         stopAllOverlayAudio();
+        for (const key in overlayVideoCache) {
+            if (overlayVideoCache[key]) overlayVideoCache[key].pause();
+        }
+
         overlayTracks = state.overlayTracks;
+
         for (const track of overlayTracks) {
             for (const item of track.items) {
                 if (item.type === 'audio' && item.audioSrc && !overlayAudioBuffers[item.id]) {
                     loadAudioBuffer(item.id, item.audioSrc);
                 }
+                if (item.type === 'video' && item.videoSrc) {
+                    if (!overlayVideoCache[item.id]) {
+                        const vid = document.createElement('video');
+                        vid.src = item.videoSrc;
+                        vid.muted = true;
+                        vid.playsInline = true;
+                        overlayVideoCache[item.id] = vid;
+                    }
+                    if (!overlayAudioBuffers[item.id]) {
+                        loadAudioBuffer(item.id, item.videoSrc);
+                    }
+                }
             }
         }
     }
+
     selectedSegIdx = null;
     renderTimeline();
     updateControls();
@@ -69,7 +87,8 @@ function updateTimeDisplay() {
 function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = filename; a.style.display = 'none';
+    a.href = url;
+    a.download = filename; a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);

@@ -3,7 +3,6 @@
 function resizeOverlayCanvas() {
     const wrapper = videoPlayer.parentElement;
     if (!wrapper) return;
-
     if (videoPlayer.videoWidth && videoPlayer.videoHeight) {
         wrapper.style.aspectRatio = `${videoPlayer.videoWidth} / ${videoPlayer.videoHeight}`;
     }
@@ -28,7 +27,8 @@ function renderOverlayPreview(currentTime) {
         for (const item of track.items) {
             if (currentTime >= item.start && currentTime < item.start + item.duration) {
                 drawSingleOverlay(overlayCtx, w, h, item);
-                if (item.type === 'image') {
+
+                if (item.type === 'image' || item.type === 'video') {
                     activeInteractiveItems.push({ trackId: track.id, item });
                 } else if (item.type === 'text') {
                     const scaledFontSize = (item.fontSize / 1080) * h;
@@ -86,6 +86,18 @@ function drawSingleOverlay(ctx, canvasW, canvasH, item) {
             ctx.save();
             ctx.globalAlpha = alpha;
             ctx.drawImage(img, x, y, imgW, imgH);
+            ctx.restore();
+        }
+    } else if (item.type === 'video') {
+        let vid = overlayVideoCache[item.id];
+        if (vid && vid.readyState >= 2) {
+            const vidW = (item.imageWidth / 100) * canvasW;
+            const vidH = (item.imageHeight / 100) * canvasH;
+            const x = (item.x / 100) * canvasW - vidW / 2;
+            const y = (item.y / 100) * canvasH - vidH / 2;
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(vid, x, y, vidW, vidH);
             ctx.restore();
         }
     }
