@@ -1,3 +1,4 @@
+// ========== ./editor/timeline.js ==========
 'use strict';
 
 function getSegments() {
@@ -20,7 +21,14 @@ function timelineToVideoTime(tTime) {
 }
 
 function getCompressedVideoDuration() {
-    return videoDuration || 0;
+    const segments = getSegments();
+    let maxEnd = 0;
+    for (const seg of segments) {
+        if (!seg.removed && seg.end > maxEnd) {
+            maxEnd = seg.end;
+        }
+    }
+    return maxEnd;
 }
 
 function getEffectiveVideoEnd() {
@@ -39,7 +47,6 @@ function updateTimelineDuration() {
     let baseDuration = getCompressedVideoDuration() || videoDuration;
     const targetDuration = Math.max(baseDuration, maxOverlayEnd);
     let finalTarget = targetDuration;
-
     if (typeof draggingOverlayItem !== 'undefined' && (draggingOverlayItem || resizingOverlayItem)) {
         finalTarget = Math.max(timelineDuration, targetDuration);
     }
@@ -116,7 +123,6 @@ function renderTimeline() {
 function renderSegments() {
     timelineSegmentsLayer.innerHTML = '';
     const segments = getSegments();
-
     segments.forEach((seg, idx) => {
         // Skip rendering for removed parts so they leave an empty gap
         if (seg.removed) return;
@@ -140,7 +146,6 @@ function renderSegments() {
         tooltip.className = 'segment-tooltip';
         tooltip.textContent = `${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
         el.appendChild(tooltip);
-
         el.addEventListener('click', (e) => {
             if (isDraggingPlayhead) return;
             e.stopPropagation();
@@ -149,6 +154,7 @@ function renderSegments() {
             const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
             const clickTime = pct * timelineDuration;
             const clickTimeVideo = timelineToVideoTime(clickTime);
+
             seekTo(clickTimeVideo);
             videoToolbar.classList.remove('hidden');
 
@@ -210,7 +216,6 @@ function drawWaveform() {
     const canvas = timelineWaveform;
     const ctx = canvas.getContext('2d');
     const rect = timeline.getBoundingClientRect();
-
     canvas.width = rect.width * window.devicePixelRatio;
     canvas.height = rect.height * window.devicePixelRatio;
     canvas.style.width = rect.width + 'px';
@@ -221,7 +226,6 @@ function drawWaveform() {
     ctx.clearRect(0, 0, w, h);
 
     const segments = getSegments();
-
     if (videoThumbnails && videoThumbnails.length > 0 && w > 0) {
         const firstThumb = videoThumbnails[0];
         const aspect = firstThumb.bitmap.width / firstThumb.bitmap.height;
@@ -239,7 +243,6 @@ function drawWaveform() {
         for (let x = 0; x < w; x += thumbWidth) {
             const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
             if (barTime > videoEnd) break;
-
             // Check if this portion was removed
             let isRemoved = false;
             for (const seg of segments) {
@@ -286,7 +289,6 @@ function drawWaveform() {
         const barCount = Math.floor(w / 4);
         const barWidth = 2;
         const gap = barCount > 1 ? (w - barCount * barWidth) / (barCount - 1) : 0;
-
         for (let i = 0; i < barCount; i++) {
             const x = i * (barWidth + gap);
             if (x + barWidth > w) break;
@@ -310,6 +312,7 @@ function drawWaveform() {
             const noise3 = Math.cos(i * 0.08) * 0.25;
             const amplitude = 0.15 + Math.abs(noise1 + noise2 + noise3);
             const barHeight = amplitude * h * 0.8;
+
             const gradient = ctx.createLinearGradient(0, (h - barHeight) / 2, 0, (h + barHeight) / 2);
             gradient.addColorStop(0, 'rgba(99, 102, 241, 0.6)');
             gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.4)');

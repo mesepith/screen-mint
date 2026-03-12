@@ -1,3 +1,4 @@
+// ========== ./editor/playback.js ==========
 'use strict';
 
 function togglePlay() {
@@ -18,6 +19,7 @@ function togglePlay() {
         ensureAudioContextReady().then(() => {
             syncOverlayAudio(currentAppTime);
         });
+
         const effectiveVideoEnd = getEffectiveVideoEnd();
         if (currentAppTime < effectiveVideoEnd) {
             stopVirtualPlayback();
@@ -185,8 +187,7 @@ function stopVideoSyncLoop() {
 
 function getTimeFromPointer(e) {
     const rect = timeline.getBoundingClientRect();
-    const clientX = e.touches ?
-        e.touches[0].clientX : e.clientX;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     return pct * timelineDuration;
 }
@@ -199,6 +200,7 @@ videoPlayer.addEventListener('play', () => {
     videoToolbar.classList.add('hidden');
     startVideoSyncLoop();
 });
+
 videoPlayer.addEventListener('pause', () => {
     stopVideoSyncLoop();
     if (!isVirtualPlaying && !isAppPlaying) {
@@ -207,6 +209,7 @@ videoPlayer.addEventListener('pause', () => {
         playOverlay.classList.remove('hidden');
     }
 });
+
 videoPlayer.addEventListener('ended', () => {
     const effectiveVideoEnd = getEffectiveVideoEnd();
     if (timelineDuration > effectiveVideoEnd) {
@@ -229,7 +232,19 @@ videoPlayer.addEventListener('timeupdate', () => {
 
     if (videoDuration > 0 && !videoPlayer.paused) {
         currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
-        const pct = (currentAppTime / timelineDuration) * 100;
+
+        // Ensure playback stops securely if it hits the cut end limit
+        if (currentAppTime >= timelineDuration) {
+            currentAppTime = timelineDuration;
+            isAppPlaying = false;
+            videoPlayer.pause();
+            playIcon.style.display = 'block';
+            pauseIcon.style.display = 'none';
+            playOverlay.classList.remove('hidden');
+            stopAllOverlayAudio();
+        }
+
+        const pct = timelineDuration > 0 ? (currentAppTime / timelineDuration) * 100 : 0;
         progressFilled.style.width = pct + '%';
         timelinePlayhead.style.left = pct + '%';
 
@@ -242,7 +257,6 @@ videoPlayer.addEventListener('timeupdate', () => {
                 break;
             }
         }
-
 
         if (isRemoved || currentAppTime > videoDuration) {
             videoPlayer.style.opacity = '0';
@@ -257,6 +271,7 @@ videoPlayer.addEventListener('timeupdate', () => {
     }
     updateTimeDisplay();
 });
+
 // ── UI Playback Interactions ──
 playOverlay.addEventListener('click', togglePlay);
 playPauseBtn.addEventListener('click', togglePlay);
@@ -269,11 +284,13 @@ stopBtn.addEventListener('click', () => {
     videoPlayer.currentTime = 0;
     updateVirtualPlayhead();
 });
+
 progressContainer.addEventListener('click', (e) => {
     const rect = progressContainer.getBoundingClientRect();
     const pct = (e.clientX - rect.left) / rect.width;
     seekTo(pct * timelineDuration);
 });
+
 timelinePlayhead.addEventListener('mousedown', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -285,6 +302,7 @@ timelinePlayhead.addEventListener('mousedown', (e) => {
     document.body.style.cursor = 'grabbing';
     document.body.style.userSelect = 'none';
 });
+
 timelinePlayhead.addEventListener('touchstart', (e) => {
     e.stopPropagation();
     isDraggingPlayhead = true;
@@ -293,14 +311,17 @@ timelinePlayhead.addEventListener('touchstart', (e) => {
     videoPlayer.pause();
     stopVirtualPlayback();
 }, { passive: true });
+
 document.addEventListener('mousemove', (e) => {
     if (!isDraggingPlayhead) return;
     seekTo(getTimeFromPointer(e));
 });
+
 document.addEventListener('touchmove', (e) => {
     if (!isDraggingPlayhead) return;
     seekTo(getTimeFromPointer(e));
 }, { passive: true });
+
 document.addEventListener('mouseup', () => {
     if (!isDraggingPlayhead) return;
     isDraggingPlayhead = false;
@@ -309,12 +330,14 @@ document.addEventListener('mouseup', () => {
     videoToolbar.classList.remove('hidden');
     if (wasPlayingBeforeDrag) togglePlay();
 });
+
 document.addEventListener('touchend', () => {
     if (!isDraggingPlayhead) return;
     isDraggingPlayhead = false;
     videoToolbar.classList.remove('hidden');
     if (wasPlayingBeforeDrag) togglePlay();
 });
+
 timeline.addEventListener('click', (e) => {
     if (isDraggingPlayhead) return;
     const rect = timeline.getBoundingClientRect();
@@ -322,12 +345,14 @@ timeline.addEventListener('click', (e) => {
     seekTo(timelineToVideoTime(pct * timelineDuration));
     videoToolbar.classList.remove('hidden');
 });
+
 // ── Volume & Sizing ──
 muteBtn.addEventListener('click', () => {
     videoPlayer.muted = !videoPlayer.muted;
     volumeOnIcon.style.display = videoPlayer.muted ? 'none' : 'block';
     volumeOffIcon.style.display = videoPlayer.muted ? 'block' : 'none';
 });
+
 volumeSlider.addEventListener('input', () => {
     videoPlayer.volume = parseFloat(volumeSlider.value);
     if (videoPlayer.volume === 0) {
@@ -340,9 +365,11 @@ volumeSlider.addEventListener('input', () => {
         volumeOffIcon.style.display = 'none';
     }
 });
+
 videoSizeSlider.addEventListener('input', () => {
     videoWrapper.style.width = videoSizeSlider.value + '%';
 });
+
 videoSizeSlider.addEventListener('change', () => {
     resizeOverlayCanvas();
     renderOverlayPreview(videoPlayer.currentTime);

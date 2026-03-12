@@ -1,3 +1,4 @@
+// ========== ./editor/export.js ==========
 'use strict';
 
 downloadBtn.addEventListener('click', async () => {
@@ -22,7 +23,7 @@ downloadBtn.addEventListener('click', async () => {
     const exportTimelineEnd = Math.max(getEffectiveVideoEnd(), maxOverlayEnd);
 
     const allSegments = getSegments();
-    if (allSegments.every(s => s.removed) && exportTimelineEnd <= videoDuration) {
+    if (allSegments.every(s => s.removed) && maxOverlayEnd === 0) {
         showToast('⚠️', 'Nothing left to download — all sections are removed.');
         return;
     }
@@ -127,7 +128,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 for (const track of overlayTracks) {
                     for (const item of track.items) {
                         if ((item.type !== 'audio' && item.type !== 'video') || (!item.audioSrc && !item.videoSrc) || !overlayAudioBuffers[item.id]) continue;
-
                         exportAudioItems.push({
                             id: item.id,
                             start: item.start,
@@ -140,15 +140,19 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 }
 
                 dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+
                 const activeExportAudioNodes = new Map();
                 const activeExportAudioIds = new Set();
 
                 canvasStream._syncExportAudio = (appTime) => {
                     const shouldBeActive = new Set();
+
                     for (const ea of exportAudioItems) {
                         const inRange = appTime >= ea.start && appTime < ea.start + ea.duration;
+
                         if (inRange) {
                             shouldBeActive.add(ea.id);
+
                             const playbackOffset = appTime - ea.start;
                             const expectedTime = ea.audioOffset + playbackOffset;
 
@@ -162,12 +166,14 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
                                 const startWhen = audioCtx.currentTime + 0.005;
                                 source.start(startWhen, expectedTime);
+
                                 activeExportAudioNodes.set(ea.id, {
                                     sourceNode: source, gainNode: gain, lastExpectedTime: expectedTime, systemTimeStart: startWhen
                                 });
                                 activeExportAudioIds.add(ea.id);
                             } else {
                                 const nodeInfo = activeExportAudioNodes.get(ea.id);
+
                                 if (nodeInfo) {
                                     nodeInfo.gainNode.gain.value = ea.volume;
                                     const actualNodePlayTime = (audioCtx.currentTime - nodeInfo.systemTimeStart) + nodeInfo.lastExpectedTime;
@@ -228,6 +234,7 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
             recorder = new MediaRecorder(canvasStream, recOptions);
             chunks = [];
+
             recorder.ondataavailable = (e) => {
                 if (e.data && e.data.size > 0) chunks.push(e.data);
             };
@@ -238,6 +245,7 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 const finalBlob = new Blob(chunks, { type: recOptions.mimeType });
                 resolve(finalBlob);
             };
+
             recorder.onerror = () => {
                 if (animFrameId) cancelAnimationFrame(animFrameId);
                 URL.revokeObjectURL(url);
@@ -258,6 +266,7 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             if (encodingTimeout) clearTimeout(encodingTimeout);
             tempVideo.pause();
             if (animFrameId) cancelAnimationFrame(animFrameId);
+
             if (canvasStream && canvasStream._exportAudioCleanup) {
                 canvasStream._exportAudioCleanup();
             }
@@ -274,7 +283,8 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
         function seekToSegment(idx) {
             if (finished) return;
-            if (idx >= segments.length) {
+            // Prevent processing any segments extending past our actual export timeline limitation
+            if (idx >= segments.length || segments[idx].start >= exportDuration) {
                 checkAndStartExtendedRendering();
                 return;
             }
@@ -283,8 +293,10 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             onProgress(`Encoding segment ${idx + 1} of ${segments.length}…`);
 
             const targetTime = segments[idx].start;
+
             if (Math.abs(tempVideo.currentTime - targetTime) < 0.05) {
                 seeking = false;
+
                 if (recorder && recorder.state === 'inactive') {
                     recorder.start(100);
                 } else if (recorder && recorder.state === 'paused') {
@@ -344,6 +356,11 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             }
 
             currentSegIndex++;
+            // Force end loop early to avoid drawing black frames for completely cropped end segments
+            if (currentSegIndex < segments.length && segments[currentSegIndex].start >= exportDuration) {
+                currentSegIndex = segments.length;
+            }
+
             if (currentSegIndex >= segments.length) {
                 checkAndStartExtendedRendering();
             } else {
@@ -360,6 +377,7 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             virtualRecordingTime += deltaSec;
             let totalVideoWritten = videoDuration;
             const currentExtAppTime = totalVideoWritten + (virtualRecordingTime - totalVideoWritten);
+
             if (currentExtAppTime >= exportDuration) {
                 finishRecording();
                 return;
@@ -384,7 +402,8 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             const seg = segments[currentSegIndex];
             if (!seg) { checkAndStartExtendedRendering(); return; }
 
-            if (tempVideo.paused || tempVideo.ended || tempVideo.currentTime >= seg.end - 0.03) {
+            // Instantly break render sequence if reaching the clipped limit
+            if (tempVideo.paused || tempVideo.ended || tempVideo.currentTime >= seg.end - 0.03 || tempVideo.currentTime >= exportDuration) {
                 advanceToNextSegment();
                 return;
             }
@@ -395,7 +414,7 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             virtualRecordingTime += deltaSec;
 
             if (seg.removed) {
-                // If section is removed, render a black frame and cut audio output
+                // Render an empty black void for removed chunks
                 ctx.fillStyle = "#000";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 if (mainVideoGain) mainVideoGain.gain.value = 0;
@@ -417,6 +436,13 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
         tempVideo.addEventListener('timeupdate', () => {
             if (finished || seeking || currentSegIndex >= segments.length || isRenderingExtended) return;
+
+            // Abort progressing further if past the crop threshold during timeupdate
+            if (tempVideo.currentTime >= exportDuration) {
+                advanceToNextSegment();
+                return;
+            }
+
             const seg = segments[currentSegIndex];
             if (!seg) return;
             if (tempVideo.currentTime >= seg.end) {
@@ -436,5 +462,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 finishRecording();
             }
         }, 5 * 60 * 1000);
+
     });
 }
