@@ -1,0 +1,44 @@
+/* ── Responsive ───────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .app {
+        padding: 16px;
+    }
+
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .editor-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .editor-controls-spacer {
+        display: none;
+    }
+
+    .actions {
+        flex-direction: column;
+    }
+
+    .action-btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .actions-spacer {
+        display: none;
+    }
+
+    .overlay-tracks-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .overlay-track-lane {
+        height: 48px;
+    }
+}

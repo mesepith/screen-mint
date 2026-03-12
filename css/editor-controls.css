@@ -1,0 +1,272 @@
+/* ── Editor Controls ──────────────────────────────────────────── */
+.editor-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 20px 0;
+}
+
+.editor-controls-spacer {
+    flex: 1;
+}
+
+.editor-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-family: 'Inter', sans-serif;
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+}
+
+.editor-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+}
+
+.editor-btn:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+    border-color: var(--border-active);
+}
+
+.editor-btn:active {
+    transform: scale(0.97);
+}
+
+.editor-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.editor-btn:disabled:hover {
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+}
+
+/* Split */
+.btn-split {
+    background: rgba(6, 182, 212, 0.08);
+    border-color: rgba(6, 182, 212, 0.2);
+    color: var(--accent-secondary);
+}
+
+.btn-split:hover {
+    background: rgba(6, 182, 212, 0.15);
+    border-color: rgba(6, 182, 212, 0.4);
+    color: var(--accent-secondary);
+}
+
+/* Remove Section */
+.btn-remove-section {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: var(--accent-danger);
+}
+
+.btn-remove-section:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #ff6b6b;
+}
+
+/* Restore Section */
+.btn-restore-section {
+    background: rgba(34, 197, 94, 0.08);
+    border-color: rgba(34, 197, 94, 0.25);
+    color: var(--accent-success);
+}
+
+.btn-restore-section:hover {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.4);
+    color: #4ade80;
+}
+
+/* Cancel / Deselect */
+.btn-cancel {
+    background: transparent;
+    border-color: var(--border-color);
+    color: var(--text-muted);
+}
+
+.btn-cancel:hover {
+    color: var(--text-secondary);
+}
+
+/* Undo All */
+.btn-undo-cuts {
+    background: transparent;
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.btn-undo-cuts:hover {
+    background: rgba(99, 102, 241, 0.08);
+    border-color: var(--border-active);
+    color: var(--accent-primary-hover);
+}
+
+/* ── Action Buttons ───────────────────────────────────────────── */
+.actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    letter-spacing: -0.2px;
+}
+
+.action-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+}
+
+.action-btn:active {
+    transform: scale(0.97);
+}
+
+.btn-download {
+    background: var(--gradient-primary);
+    color: white;
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+}
+
+.btn-download:hover {
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45);
+    transform: translateY(-1px);
+}
+
+.btn-discard {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.btn-discard:hover {
+    background: rgba(239, 68, 68, 0.08);
+    color: var(--accent-danger);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.actions-spacer {
+    flex: 1;
+}
+
+/* ── Inline Track Menu ─────────────────────────────────────────── */
+.inline-track-menu {
+    position: absolute;
+    background: #000000;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-sm);
+    display: flex;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    z-index: 50;
+    padding: 6px;
+    gap: 8px;
+}
+
+.inline-track-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: none;
+    background: #ffffff;
+    color: #12121a;
+    font-size: 0.8rem;
+    font-weight: 700;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+}
+
+.inline-track-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
+.inline-track-btn:hover {
+    background: #f0f0f5;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/* ── Inline Cut Menu ───────────────────────────────────────────── */
+.inline-cut-menu {
+    position: absolute;
+    background: #000000;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-sm);
+    display: flex;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    z-index: 50;
+    padding: 6px;
+    gap: 8px;
+    transform: translateX(-50%);
+    pointer-events: auto;
+}
+
+.inline-cut-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px;
+    border: none;
+    background: #ffffff;
+    color: #12121a;
+    font-size: 0.78rem;
+    font-weight: 700;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+    white-space: nowrap;
+}
+
+.inline-cut-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+}
+
+.inline-cut-btn:hover {
+    background: #f0f0f5;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.inline-cut-btn.btn-delete {
+    color: #ef4444;
+}
+
+.inline-cut-btn.btn-delete:hover {
+    background: #fee2e2;
+    color: #dc2626;
+}
