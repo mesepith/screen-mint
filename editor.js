@@ -301,23 +301,35 @@
                 videoPlayer.currentTime = 0;
             }
 
-            // Pre-warm AudioContext and eagerly start audio BEFORE video play
-            // This eliminates the 1-3 frame delay from waiting for play event → RAF → sync
-            ensureAudioContextReady().then(() => {
-                syncOverlayAudio(currentAppTime);
-            });
+                // Pre-warm AudioContext and eagerly start audio BEFORE video play
+                // This eliminates the 1-3 frame delay from waiting for play event → RAF → sync
+                ensureAudioContextReady().then(() => {
+                    syncOverlayAudio(currentAppTime);
+                });
 
-            const effectiveVideoEnd = typeof getEffectiveVideoEnd === 'function' ? getEffectiveVideoEnd() : videoDuration;
-            if (currentAppTime < effectiveVideoEnd) {
-                stopVirtualPlayback();
-                videoPlayer.play();
-                playIcon.style.display = 'none';
-                pauseIcon.style.display = 'block';
-                playOverlay.classList.add('hidden');
-                videoToolbar.classList.add('hidden');
-            } else {
-                videoPlayer.pause();
-                startVirtualPlayback();
+                const effectiveVideoEnd = typeof getEffectiveVideoEnd === 'function' ? getEffectiveVideoEnd() : videoDuration;
+                if (currentAppTime < effectiveVideoEnd) {
+                    
+                    // Immediately skip removed segment if playhead starts inside one
+                    const segments = typeof getSegments === 'function' ? getSegments() : [];
+                    for (const seg of segments) {
+                        if (seg.removed && videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
+                            videoPlayer.currentTime = seg.end;
+                            // Make sure timeline visually updates before frame renders
+                            currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
+                            break;
+                        }
+                    }
+
+                    stopVirtualPlayback();
+                    videoPlayer.play();
+                    playIcon.style.display = 'none';
+                    pauseIcon.style.display = 'block';
+                    playOverlay.classList.add('hidden');
+                    videoToolbar.classList.add('hidden');
+                } else {
+                    videoPlayer.pause();
+                    startVirtualPlayback();
                 playIcon.style.display = 'none';
                 pauseIcon.style.display = 'block';
                 playOverlay.classList.add('hidden');
@@ -332,6 +344,17 @@
         const effectiveVideoEnd = typeof getEffectiveVideoEnd === 'function' ? getEffectiveVideoEnd() : videoDuration;
         if (currentAppTime < effectiveVideoEnd) {
             videoPlayer.currentTime = timelineToVideoTime(currentAppTime);
+
+            // Immediately skip removed segment if seeking lands inside one
+            const segments = typeof getSegments === 'function' ? getSegments() : [];
+            for (const seg of segments) {
+                if (seg.removed && videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
+                    videoPlayer.currentTime = seg.end;
+                    currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
+                    break;
+                }
+            }
+
             if (isAppPlaying) {
                 videoPlayer.play();
                 stopVirtualPlayback();
@@ -604,7 +627,7 @@
         const rect = timeline.getBoundingClientRect();
         const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
 
-        seekTo(snapToKept(pct * timelineDuration));
+        seekTo(timelineToVideoTime(pct * timelineDuration));
         videoToolbar.classList.remove('hidden');
     });
 
@@ -674,9 +697,9 @@
             ctx.save();
             ctx.beginPath();
             
-            // In Ripple Edit mode, the entire timeline width is valid video (no blank spaces).
-            // We just need to stop clipping when we reach the end of the compressed video.
-            const compressedVideoEnd = getCompressedVideoDuration();
+            // In non-ripple mode, the entire timeline width is valid video
+            // We just need to stop clipping when we reach the end of the video timeline duration.
+            const compressedVideoEnd = timelineDuration > videoDuration ? videoDuration : timelineDuration;
             const compressedVideoWidth = (compressedVideoEnd / timelineDuration) * w;
             ctx.rect(0, 0, compressedVideoWidth, h);
             ctx.clip();
@@ -686,7 +709,7 @@
                 const barTimeTimeline = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
                 if (barTimeTimeline > compressedVideoEnd) break;
                 
-                const barTimeVideo = timelineToVideoTime(barTimeTimeline);
+                const barTimeVideo = barTimeTimeline; // 1:1 mapping now
                 
                 // Find the closest thumbnail for `barTimeVideo`
                 let closestThumb = videoThumbnails[0];
@@ -728,13 +751,10 @@
 
             // Map bar position to timeline time, then to video time
             const tTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
-            const vTime = timelineToVideoTime(tTime);
+            const vTime = tTime; // 1:1 mapping now
 
-            // Don't draw bars past the compressed video content
-            if (tTime > getCompressedVideoDuration()) continue;
-
-            // Notice we do NOT skip bars for removed segments, because timelineToVideoTime 
-            // naturally skips the deleted time when translating `tTime` to `vTime`.
+            // Don't draw bars past the video content
+            if (tTime > videoDuration) continue;
 
             const noise1 = Math.sin(i * 0.15) * 0.3;
             const noise2 = Math.sin(i * 0.4 + 1.5) * 0.2;
@@ -767,81 +787,21 @@
         timelineLabelEnd.textContent = formatTimePrecise(timelineDuration);
     }
 
-    // ── Time Mappers for Ripple Delete ─────────────────────────────
+    // ── Time Mappers ─────────────────────────────
     
-    // Converts literal video time into compressed timeline time (skips removed segments)
+    // With ripple edit disabled, timeline time and video time are 1:1
     function videoToTimelineTime(vTime) {
-        if (!videoDuration || vTime <= 0) return 0;
-        
-        let tTime = 0;
-        const segments = typeof getSegments === 'function' ? getSegments() : [];
-        
-        for (const seg of segments) {
-            if (vTime <= seg.start) {
-                // target time is before this segment even starts
-                break;
-            }
-            
-            if (!seg.removed) {
-                if (vTime < seg.end) {
-                    // target time is within this kept segment
-                    tTime += (vTime - seg.start);
-                    break;
-                } else {
-                    // target time is past this kept segment
-                    tTime += (seg.end - seg.start);
-                }
-            } else {
-                if (vTime < seg.end) {
-                    // target time is within a removed segment, it resolves to the border
-                    break;
-                }
-            }
-        }
-        
-        return tTime;
+        return vTime || 0;
     }
 
-    // Converts compressed timeline time back to literal video time
+    // With ripple edit disabled, timeline time and video time are 1:1
     function timelineToVideoTime(tTime) {
-        if (!videoDuration || tTime <= 0) return 0;
-        
-        let vTime = 0;
-        let accumulatedT = 0;
-        const segments = typeof getSegments === 'function' ? getSegments() : [];
-        
-        for (const seg of segments) {
-            if (!seg.removed) {
-                const segDuration = seg.end - seg.start;
-                if (accumulatedT + segDuration >= tTime) {
-                    // The target timeline time falls within this kept segment
-                    vTime = seg.start + (tTime - accumulatedT);
-                    accumulatedT = tTime;
-                    break; 
-                } else {
-                    accumulatedT += segDuration;
-                    vTime = seg.end;
-                }
-            } else {
-                // skip removed segments in timeline time, but they advance video time
-                vTime = seg.end;
-            }
-        }
-        
-        return vTime;
+        return tTime || 0;
     }
     
-    // Calculate the total duration of kept video segments
+    // Calculate the total duration of kept video segments (Now disabled for non-shifting timeline)
     function getCompressedVideoDuration() {
-        if (!videoDuration) return 0;
-        let total = 0;
-        const segments = typeof getSegments === 'function' ? getSegments() : [];
-        for (const seg of segments) {
-            if (!seg.removed) {
-                total += (seg.end - seg.start);
-            }
-        }
-        return total;
+        return videoDuration || 0;
     }
 
     function getEffectiveVideoEnd() {
@@ -975,6 +935,13 @@
         const seg = getSegments()[selectedSegIdx];
         showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
 
+        // If playhead is currently inside the removed segment, skip it forward so the removed frame isn't shown
+        if (videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
+            videoPlayer.currentTime = seg.end;
+            currentAppTime = videoToTimelineTime(seg.end);
+            updateVirtualPlayhead();
+        }
+
         selectedSegIdx = null;
         updateTimelineDuration(); // Recalculate timeline bounds
         drawWaveform(); // Redraw waveform to blank out removed region
@@ -1025,8 +992,6 @@
         // we must scale them back relative to timelineDuration for correct rendering
 
         segments.forEach((seg, idx) => {
-            if (seg.removed) return; // Completely hide removed segments
-            
             const tStart = videoToTimelineTime(seg.start);
             if (tStart >= timelineDuration) return; // Completely off-timeline (past end)
 
@@ -1039,13 +1004,14 @@
             const el = document.createElement('div');
             el.className = 'segment-overlay';
             if (idx === selectedSegIdx) el.classList.add('selected');
+            if (seg.removed) el.classList.add('removed'); // Add a class to hide or style removed segments
             el.style.left = leftPct + '%';
             el.style.width = widthPct + '%';
 
             // Tooltip with time range
             const tooltip = document.createElement('span');
             tooltip.className = 'segment-tooltip';
-            tooltip.textContent = `${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
+            tooltip.textContent = `${seg.removed ? '[REMOVED] ' : ''}${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
             el.appendChild(tooltip);
 
             // Click to select this segment (but not during playhead drag)
@@ -1979,6 +1945,13 @@
                 removedFlags[segIdx] = true;
                 const seg = segments[segIdx];
                 showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
+
+                // If playhead is currently inside the removed segment, skip it forward so the removed frame isn't shown
+                if (videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
+                    videoPlayer.currentTime = seg.end;
+                    currentAppTime = videoToTimelineTime(seg.end);
+                    updateVirtualPlayhead();
+                }
 
                 selectedSegIdx = null;
                 updateTimelineDuration(); // Recalculate timeline bounds
@@ -3121,11 +3094,11 @@
                 break;
             case 'ArrowLeft':
                 e.preventDefault();
-                videoPlayer.currentTime = snapToKept(Math.max(0, videoPlayer.currentTime - 5));
+                videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 5);
                 break;
             case 'ArrowRight':
                 e.preventDefault();
-                videoPlayer.currentTime = snapToKept(Math.min(videoDuration, videoPlayer.currentTime + 5));
+                videoPlayer.currentTime = Math.min(videoDuration, videoPlayer.currentTime + 5);
                 break;
             case 'm':
                 videoPlayer.muted = !videoPlayer.muted;
