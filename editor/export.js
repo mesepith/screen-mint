@@ -21,8 +21,8 @@ downloadBtn.addEventListener('click', async () => {
     }
     const exportTimelineEnd = Math.max(getEffectiveVideoEnd(), maxOverlayEnd);
 
-    const keptSegments = getSegments().filter(s => !s.removed);
-    if (keptSegments.length === 0 && exportTimelineEnd <= videoDuration) {
+    const allSegments = getSegments();
+    if (allSegments.every(s => s.removed) && exportTimelineEnd <= videoDuration) {
         showToast('⚠️', 'Nothing left to download — all sections are removed.');
         return;
     }
@@ -32,9 +32,10 @@ downloadBtn.addEventListener('click', async () => {
     processingSubtext.textContent = 'Preparing…';
 
     try {
-        const editedBlob = await encodeKeptSegments(videoBlob, keptSegments, exportTimelineEnd, (progress) => {
+        const editedBlob = await encodeSegments(videoBlob, allSegments, exportTimelineEnd, (progress) => {
             processingSubtext.textContent = progress;
         });
+
         const ext = videoFileName.split('.').pop();
         const baseName = videoFileName.replace('.' + ext, '');
         const newFileName = `${baseName}_edited.${ext}`;
@@ -57,7 +58,7 @@ discardBtn.addEventListener('click', async () => {
     }
 });
 
-function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
+function encodeSegments(blob, segments, exportDuration, onProgress) {
     return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(blob);
         const tempVideo = document.createElement('video');
@@ -68,7 +69,9 @@ function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
         let currentSegIndex = 0;
         let recorder = null;
         let chunks = [];
+
         let canvas, ctx, canvasStream, recOptions;
+        let mainVideoGain;
         let animFrameId = null;
         let virtualRecordingTime = 0;
         let isRenderingExtended = false;
@@ -95,7 +98,10 @@ function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
                 const audioCtx = new AudioContext();
                 const dest = audioCtx.createMediaStreamDestination();
                 const source = audioCtx.createMediaElementSource(tempVideo);
-                source.connect(dest);
+
+                mainVideoGain = audioCtx.createGain();
+                source.connect(mainVideoGain);
+                mainVideoGain.connect(dest);
 
                 const exportAudioItems = [];
                 for (const track of overlayTracks) {
@@ -113,6 +119,7 @@ function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
                 }
 
                 dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+
                 const activeExportAudioNodes = new Map();
                 const activeExportAudioIds = new Set();
 
@@ -258,8 +265,10 @@ function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
             onProgress(`Encoding segment ${idx + 1} of ${segments.length}…`);
 
             const targetTime = segments[idx].start;
+
             if (Math.abs(tempVideo.currentTime - targetTime) < 0.05) {
                 seeking = false;
+
                 if (recorder && recorder.state === 'inactive') {
                     recorder.start(100);
                 } else if (recorder && recorder.state === 'paused') {
@@ -291,7 +300,7 @@ function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
         }
 
         function checkAndStartExtendedRendering() {
-            let writtenContentTime = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
+            let writtenContentTime = videoDuration;
             if (exportDuration > writtenContentTime) {
                 onProgress(`Encoding extended timeline…`);
                 isRenderingExtended = true;
@@ -333,7 +342,7 @@ function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
             lastDrawTime = now;
 
             virtualRecordingTime += deltaSec;
-            let totalVideoWritten = segments.reduce((acc, seg) => acc + (seg.end - seg.start), 0);
+            let totalVideoWritten = videoDuration;
             const currentExtAppTime = totalVideoWritten + (virtualRecordingTime - totalVideoWritten);
 
             if (currentExtAppTime >= exportDuration) {
@@ -369,7 +378,16 @@ function encodeKeptSegments(blob, segments, exportDuration, onProgress) {
             lastDrawTime = now;
             virtualRecordingTime += deltaSec;
 
-            ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+            if (seg.removed) {
+                // If section is removed, render a black frame and cut audio output
+                ctx.fillStyle = "#000";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                if (mainVideoGain) mainVideoGain.gain.value = 0;
+            } else {
+                ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+                if (mainVideoGain) mainVideoGain.gain.value = 1;
+            }
+
             try {
                 drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, tempVideo.currentTime);
             } catch (e) { console.warn('Overlay draw error:', e); }

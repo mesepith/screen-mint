@@ -10,52 +10,17 @@ function getSegments() {
     }));
 }
 
+// Ensure 1:1 time mapping without compressing removed segments
 function videoToTimelineTime(vTime) {
-    if (!vTime) return 0;
-    const segments = getSegments();
-    if (segments.length === 0) return vTime;
-    let tTime = 0;
-    for (const seg of segments) {
-        if (seg.removed) {
-            if (vTime >= seg.end) continue;
-            if (vTime >= seg.start) return tTime;
-            return tTime;
-        } else {
-            if (vTime <= seg.start) return tTime;
-            if (vTime <= seg.end) return tTime + (vTime - seg.start);
-            tTime += (seg.end - seg.start);
-        }
-    }
-    return tTime;
+    return vTime || 0;
 }
 
 function timelineToVideoTime(tTime) {
-    if (!tTime) return 0;
-    const segments = getSegments();
-    if (segments.length === 0) return tTime;
-    let remaining = tTime;
-    for (const seg of segments) {
-        if (seg.removed) continue;
-        const segDur = seg.end - seg.start;
-        if (remaining <= segDur) return seg.start + remaining;
-        remaining -= segDur;
-    }
-    for (let i = segments.length - 1; i >= 0; i--) {
-        if (!segments[i].removed) return segments[i].end;
-    }
-    return 0;
+    return tTime || 0;
 }
 
 function getCompressedVideoDuration() {
-    if (!videoDuration) return 0;
-    let total = 0;
-    const segments = getSegments();
-    for (const seg of segments) {
-        if (!seg.removed) {
-            total += (seg.end - seg.start);
-        }
-    }
-    return total;
+    return videoDuration || 0;
 }
 
 function getEffectiveVideoEnd() {
@@ -153,13 +118,14 @@ function renderSegments() {
     const segments = getSegments();
 
     segments.forEach((seg, idx) => {
+        // Skip rendering for removed parts so they leave an empty gap
         if (seg.removed) return;
 
-        const tStart = videoToTimelineTime(seg.start);
+        const tStart = seg.start;
         if (tStart >= timelineDuration) return;
 
-        const renderEnd = Math.min(seg.end, timelineToVideoTime(timelineDuration));
-        const tEnd = videoToTimelineTime(renderEnd);
+        const renderEnd = Math.min(seg.end, timelineDuration);
+        const tEnd = renderEnd;
 
         const leftPct = timelineDuration > 0 ? (tStart / timelineDuration) * 100 : 0;
         const widthPct = timelineDuration > 0 ? ((tEnd - tStart) / timelineDuration) * 100 : 0;
@@ -195,7 +161,6 @@ function renderSegments() {
                 selectSegment(idx);
             }
         });
-
         timelineSegmentsLayer.appendChild(el);
     });
 }
@@ -211,6 +176,7 @@ function renderSplitMarkers() {
         const marker = document.createElement('div');
         marker.className = 'split-marker';
         marker.style.left = pct + '%';
+
         timelineSplitsLayer.appendChild(marker);
     });
 }
@@ -254,6 +220,8 @@ function drawWaveform() {
     const w = rect.width, h = rect.height;
     ctx.clearRect(0, 0, w, h);
 
+    const segments = getSegments();
+
     if (videoThumbnails && videoThumbnails.length > 0 && w > 0) {
         const firstThumb = videoThumbnails[0];
         const aspect = firstThumb.bitmap.width / firstThumb.bitmap.height;
@@ -262,30 +230,46 @@ function drawWaveform() {
 
         ctx.save();
         ctx.beginPath();
-        const compressedVideoEnd = getCompressedVideoDuration();
-        const compressedVideoWidth = (compressedVideoEnd / timelineDuration) * w;
-        ctx.rect(0, 0, compressedVideoWidth, h);
+        // Uses full timeline video duration
+        const videoEnd = videoDuration || 0;
+        const videoWidth = timelineDuration > 0 ? (videoEnd / timelineDuration) * w : w;
+        ctx.rect(0, 0, videoWidth, h);
         ctx.clip();
 
         for (let x = 0; x < w; x += thumbWidth) {
-            const barTimeTimeline = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
-            if (barTimeTimeline > compressedVideoEnd) break;
+            const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
+            if (barTime > videoEnd) break;
 
-            const barTimeVideo = timelineToVideoTime(barTimeTimeline);
-            let closestThumb = videoThumbnails[0];
-            let minDiff = Infinity;
-
-            for (const thumb of videoThumbnails) {
-                const diff = Math.abs(thumb.time - barTimeVideo);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closestThumb = thumb;
+            // Check if this portion was removed
+            let isRemoved = false;
+            for (const seg of segments) {
+                if (seg.removed && barTime >= seg.start && barTime < seg.end) {
+                    isRemoved = true;
+                    break;
                 }
             }
 
             let drawWidth = thumbWidth;
             if (x + thumbWidth > w) {
                 drawWidth = w - x;
+            }
+
+            if (isRemoved) {
+                // Render an empty black void for removed chunks
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.fillRect(x, 0, drawWidth, thumbHeight);
+                continue;
+            }
+
+            let closestThumb = videoThumbnails[0];
+            let minDiff = Infinity;
+
+            for (const thumb of videoThumbnails) {
+                const diff = Math.abs(thumb.time - barTime);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestThumb = thumb;
+                }
             }
 
             if (drawWidth > 0) {
@@ -298,6 +282,7 @@ function drawWaveform() {
         ctx.restore();
 
     } else {
+        // Render audio bar fallback
         const barCount = Math.floor(w / 4);
         const barWidth = 2;
         const gap = barCount > 1 ? (w - barCount * barWidth) / (barCount - 1) : 0;
@@ -306,15 +291,25 @@ function drawWaveform() {
             const x = i * (barWidth + gap);
             if (x + barWidth > w) break;
 
-            const tTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
-            if (tTime > getCompressedVideoDuration()) continue;
+            const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
+            if (barTime > videoDuration) continue;
+
+            let isRemoved = false;
+            for (const seg of segments) {
+                if (seg.removed && barTime >= seg.start && barTime < seg.end) {
+                    isRemoved = true;
+                    break;
+                }
+            }
+
+            // Do not draw waveform bars for deleted segments
+            if (isRemoved) continue;
 
             const noise1 = Math.sin(i * 0.15) * 0.3;
             const noise2 = Math.sin(i * 0.4 + 1.5) * 0.2;
             const noise3 = Math.cos(i * 0.08) * 0.25;
             const amplitude = 0.15 + Math.abs(noise1 + noise2 + noise3);
             const barHeight = amplitude * h * 0.8;
-
             const gradient = ctx.createLinearGradient(0, (h - barHeight) / 2, 0, (h + barHeight) / 2);
             gradient.addColorStop(0, 'rgba(99, 102, 241, 0.6)');
             gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.4)');
@@ -345,17 +340,12 @@ removeSectionBtn.addEventListener('click', () => {
     const seg = getSegments()[selectedSegIdx];
     showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
 
-    if (videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
-        videoPlayer.currentTime = seg.end;
-        currentAppTime = videoToTimelineTime(seg.end);
-        updateVirtualPlayhead();
-    }
-
     selectedSegIdx = null;
     updateTimelineDuration();
     drawWaveform();
     renderTimeline();
     updateControls();
+    updateVirtualPlayhead(); // Ensures playback skips properly if the playhead was in this area
 });
 
 deselectBtn.addEventListener('click', () => {

@@ -21,15 +21,6 @@ function togglePlay() {
 
         const effectiveVideoEnd = getEffectiveVideoEnd();
         if (currentAppTime < effectiveVideoEnd) {
-            const segments = getSegments();
-            for (const seg of segments) {
-                if (seg.removed && videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
-                    videoPlayer.currentTime = seg.end;
-                    currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
-                    break;
-                }
-            }
-
             stopVirtualPlayback();
             videoPlayer.play();
             playIcon.style.display = 'none';
@@ -53,14 +44,6 @@ function seekTo(targetTime) {
 
     if (currentAppTime < effectiveVideoEnd) {
         videoPlayer.currentTime = timelineToVideoTime(currentAppTime);
-        const segments = getSegments();
-        for (const seg of segments) {
-            if (seg.removed && videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
-                videoPlayer.currentTime = seg.end;
-                currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
-                break;
-            }
-        }
 
         if (isAppPlaying) {
             videoPlayer.play();
@@ -126,10 +109,23 @@ function updateVirtualPlayhead() {
         const pct = (currentAppTime / timelineDuration) * 100;
         progressFilled.style.width = pct + '%';
         timelinePlayhead.style.left = pct + '%';
-        if (currentAppTime > videoDuration) {
+
+        let isRemoved = false;
+        const segments = getSegments();
+        for (const seg of segments) {
+            if (seg.removed && currentAppTime >= seg.start && currentAppTime < seg.end) {
+                isRemoved = true;
+                break;
+            }
+        }
+
+        // Hide video visually & mute original audio when inside a removed section
+        if (isRemoved || currentAppTime > videoDuration) {
             videoPlayer.style.opacity = '0';
+            videoPlayer.volume = 0;
         } else {
             videoPlayer.style.opacity = '1';
+            videoPlayer.volume = parseFloat(volumeSlider.value);
         }
 
         renderOverlayPreview(currentAppTime);
@@ -204,12 +200,21 @@ videoPlayer.addEventListener('timeupdate', () => {
         progressFilled.style.width = pct + '%';
         timelinePlayhead.style.left = pct + '%';
 
+        let isRemoved = false;
         const segments = getSegments();
         for (const seg of segments) {
-            if (seg.removed && videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end - 0.05) {
-                videoPlayer.currentTime = seg.end;
-                return;
+            if (seg.removed && currentAppTime >= seg.start && currentAppTime < seg.end) {
+                isRemoved = true;
+                break;
             }
+        }
+
+        if (isRemoved || currentAppTime > videoDuration) {
+            videoPlayer.style.opacity = '0';
+            videoPlayer.volume = 0;
+        } else {
+            videoPlayer.style.opacity = '1';
+            videoPlayer.volume = parseFloat(volumeSlider.value);
         }
 
         renderOverlayPreview(currentAppTime);
