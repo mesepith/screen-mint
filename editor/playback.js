@@ -1,0 +1,322 @@
+'use strict';
+
+function togglePlay() {
+    if (isAppPlaying) {
+        isAppPlaying = false;
+        videoPlayer.pause();
+        stopVirtualPlayback();
+        playIcon.style.display = 'block';
+        pauseIcon.style.display = 'none';
+        playOverlay.classList.remove('hidden');
+    } else {
+        isAppPlaying = true;
+        if (currentAppTime >= timelineDuration) {
+            currentAppTime = 0;
+            videoPlayer.currentTime = 0;
+        }
+
+        ensureAudioContextReady().then(() => {
+            syncOverlayAudio(currentAppTime);
+        });
+
+        const effectiveVideoEnd = getEffectiveVideoEnd();
+        if (currentAppTime < effectiveVideoEnd) {
+            const segments = getSegments();
+            for (const seg of segments) {
+                if (seg.removed && videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
+                    videoPlayer.currentTime = seg.end;
+                    currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
+                    break;
+                }
+            }
+
+            stopVirtualPlayback();
+            videoPlayer.play();
+            playIcon.style.display = 'none';
+            pauseIcon.style.display = 'block';
+            playOverlay.classList.add('hidden');
+            videoToolbar.classList.add('hidden');
+        } else {
+            videoPlayer.pause();
+            startVirtualPlayback();
+            playIcon.style.display = 'none';
+            pauseIcon.style.display = 'block';
+            playOverlay.classList.add('hidden');
+            videoToolbar.classList.add('hidden');
+        }
+    }
+}
+
+function seekTo(targetTime) {
+    currentAppTime = targetTime;
+    const effectiveVideoEnd = getEffectiveVideoEnd();
+
+    if (currentAppTime < effectiveVideoEnd) {
+        videoPlayer.currentTime = timelineToVideoTime(currentAppTime);
+        const segments = getSegments();
+        for (const seg of segments) {
+            if (seg.removed && videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
+                videoPlayer.currentTime = seg.end;
+                currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
+                break;
+            }
+        }
+
+        if (isAppPlaying) {
+            videoPlayer.play();
+            stopVirtualPlayback();
+        } else {
+            videoPlayer.pause();
+            stopVirtualPlayback();
+        }
+    } else {
+        videoPlayer.currentTime = timelineToVideoTime(effectiveVideoEnd);
+        videoPlayer.pause();
+        if (isAppPlaying) {
+            startVirtualPlayback();
+        } else {
+            stopVirtualPlayback();
+        }
+    }
+    updateVirtualPlayhead();
+}
+
+function startVirtualPlayback() {
+    if (isVirtualPlaying) return;
+    isVirtualPlaying = true;
+    lastRenderTime = performance.now();
+    virtualPlayInterval = requestAnimationFrame(virtualPlayLoop);
+}
+
+function stopVirtualPlayback() {
+    isVirtualPlaying = false;
+    if (virtualPlayInterval) cancelAnimationFrame(virtualPlayInterval);
+
+    playIcon.style.display = 'block';
+    pauseIcon.style.display = 'none';
+    if (videoPlayer.paused) {
+        playOverlay.classList.remove('hidden');
+    }
+    stopAllOverlayAudio();
+}
+
+function virtualPlayLoop(time) {
+    if (!isVirtualPlaying) return;
+    const deltaSec = (time - lastRenderTime) / 1000;
+    lastRenderTime = time;
+
+    currentAppTime += deltaSec;
+    if (currentAppTime >= timelineDuration) {
+        currentAppTime = timelineDuration;
+        isAppPlaying = false;
+        stopVirtualPlayback();
+        playIcon.style.display = 'block';
+        pauseIcon.style.display = 'none';
+        playOverlay.classList.remove('hidden');
+    }
+
+    updateVirtualPlayhead();
+    if (isVirtualPlaying) {
+        virtualPlayInterval = requestAnimationFrame(virtualPlayLoop);
+    }
+}
+
+function updateVirtualPlayhead() {
+    if (timelineDuration > 0) {
+        const pct = (currentAppTime / timelineDuration) * 100;
+        progressFilled.style.width = pct + '%';
+        timelinePlayhead.style.left = pct + '%';
+        if (currentAppTime > videoDuration) {
+            videoPlayer.style.opacity = '0';
+        } else {
+            videoPlayer.style.opacity = '1';
+        }
+
+        renderOverlayPreview(currentAppTime);
+        updateLanePlayheads(pct);
+        syncOverlayAudio(currentAppTime);
+    }
+    updateTimeDisplay();
+}
+
+function startVideoSyncLoop() {
+    if (!isAppPlaying || isVirtualPlaying) return;
+    if (videoDuration > 0 && !videoPlayer.paused) {
+        syncOverlayAudio(videoPlayer.currentTime);
+    }
+    videoSyncRAF = requestAnimationFrame(startVideoSyncLoop);
+}
+
+function stopVideoSyncLoop() {
+    if (videoSyncRAF) {
+        cancelAnimationFrame(videoSyncRAF);
+        videoSyncRAF = null;
+    }
+}
+
+function getTimeFromPointer(e) {
+    const rect = timeline.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return pct * timelineDuration;
+}
+
+// ── Native Video Events ──
+videoPlayer.addEventListener('play', () => {
+    playIcon.style.display = 'none';
+    pauseIcon.style.display = 'block';
+    playOverlay.classList.add('hidden');
+    videoToolbar.classList.add('hidden');
+    startVideoSyncLoop();
+});
+
+videoPlayer.addEventListener('pause', () => {
+    stopVideoSyncLoop();
+    if (!isVirtualPlaying && !isAppPlaying) {
+        playIcon.style.display = 'block';
+        pauseIcon.style.display = 'none';
+        playOverlay.classList.remove('hidden');
+    }
+});
+
+videoPlayer.addEventListener('ended', () => {
+    const effectiveVideoEnd = getEffectiveVideoEnd();
+    if (timelineDuration > effectiveVideoEnd) {
+        if (isAppPlaying) {
+            startVirtualPlayback();
+        }
+    } else {
+        isAppPlaying = false;
+        playIcon.style.display = 'block';
+        pauseIcon.style.display = 'none';
+        playOverlay.classList.remove('hidden');
+        stopAllOverlayAudio();
+    }
+});
+
+videoPlayer.addEventListener('timeupdate', () => {
+    if (isVirtualPlaying || isDraggingPlayhead) return;
+    if (!isAppPlaying && currentAppTime >= videoDuration) return;
+
+    if (videoDuration > 0 && !videoPlayer.paused) {
+        currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
+        const pct = (currentAppTime / timelineDuration) * 100;
+        progressFilled.style.width = pct + '%';
+        timelinePlayhead.style.left = pct + '%';
+
+        const segments = getSegments();
+        for (const seg of segments) {
+            if (seg.removed && videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end - 0.05) {
+                videoPlayer.currentTime = seg.end;
+                return;
+            }
+        }
+
+        renderOverlayPreview(currentAppTime);
+        updateLanePlayheads(pct);
+    }
+    updateTimeDisplay();
+});
+
+// ── UI Playback Interactions ──
+playOverlay.addEventListener('click', togglePlay);
+playPauseBtn.addEventListener('click', togglePlay);
+
+stopBtn.addEventListener('click', () => {
+    isAppPlaying = false;
+    videoPlayer.pause();
+    stopVirtualPlayback();
+    currentAppTime = 0;
+    videoPlayer.currentTime = 0;
+    updateVirtualPlayhead();
+});
+
+progressContainer.addEventListener('click', (e) => {
+    const rect = progressContainer.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    seekTo(pct * timelineDuration);
+});
+
+timelinePlayhead.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isDraggingPlayhead = true;
+    wasPlayingBeforeDrag = isAppPlaying;
+    isAppPlaying = false;
+    videoPlayer.pause();
+    stopVirtualPlayback();
+    document.body.style.cursor = 'grabbing';
+    document.body.style.userSelect = 'none';
+});
+
+timelinePlayhead.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+    isDraggingPlayhead = true;
+    wasPlayingBeforeDrag = isAppPlaying;
+    isAppPlaying = false;
+    videoPlayer.pause();
+    stopVirtualPlayback();
+}, { passive: true });
+
+document.addEventListener('mousemove', (e) => {
+    if (!isDraggingPlayhead) return;
+    seekTo(getTimeFromPointer(e));
+});
+
+document.addEventListener('touchmove', (e) => {
+    if (!isDraggingPlayhead) return;
+    seekTo(getTimeFromPointer(e));
+}, { passive: true });
+
+document.addEventListener('mouseup', () => {
+    if (!isDraggingPlayhead) return;
+    isDraggingPlayhead = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    videoToolbar.classList.remove('hidden');
+    if (wasPlayingBeforeDrag) togglePlay();
+});
+
+document.addEventListener('touchend', () => {
+    if (!isDraggingPlayhead) return;
+    isDraggingPlayhead = false;
+    videoToolbar.classList.remove('hidden');
+    if (wasPlayingBeforeDrag) togglePlay();
+});
+
+timeline.addEventListener('click', (e) => {
+    if (isDraggingPlayhead) return;
+    const rect = timeline.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seekTo(timelineToVideoTime(pct * timelineDuration));
+    videoToolbar.classList.remove('hidden');
+});
+
+// ── Volume & Sizing ──
+muteBtn.addEventListener('click', () => {
+    videoPlayer.muted = !videoPlayer.muted;
+    volumeOnIcon.style.display = videoPlayer.muted ? 'none' : 'block';
+    volumeOffIcon.style.display = videoPlayer.muted ? 'block' : 'none';
+});
+
+volumeSlider.addEventListener('input', () => {
+    videoPlayer.volume = parseFloat(volumeSlider.value);
+    if (videoPlayer.volume === 0) {
+        videoPlayer.muted = true;
+        volumeOnIcon.style.display = 'none';
+        volumeOffIcon.style.display = 'block';
+    } else {
+        videoPlayer.muted = false;
+        volumeOnIcon.style.display = 'block';
+        volumeOffIcon.style.display = 'none';
+    }
+});
+
+videoSizeSlider.addEventListener('input', () => {
+    videoWrapper.style.width = videoSizeSlider.value + '%';
+});
+
+videoSizeSlider.addEventListener('change', () => {
+    resizeOverlayCanvas();
+    renderOverlayPreview(videoPlayer.currentTime);
+});
