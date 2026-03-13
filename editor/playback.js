@@ -11,7 +11,10 @@ function togglePlay() {
         playOverlay.classList.remove('hidden');
     } else {
         isAppPlaying = true;
-        if (currentAppTime >= timelineDuration) {
+        const contentEnd = getContentEnd();
+
+        // If user clicks play while playhead is at or past the end of the content, restart.
+        if (currentAppTime >= contentEnd) {
             currentAppTime = 0;
             videoPlayer.currentTime = 0;
         }
@@ -93,8 +96,11 @@ function virtualPlayLoop(time) {
     lastRenderTime = time;
 
     currentAppTime += deltaSec;
-    if (currentAppTime >= timelineDuration) {
-        currentAppTime = timelineDuration;
+    const contentEnd = getContentEnd();
+
+    // Stop virtual playhead when it passes the actual end of content
+    if (currentAppTime >= contentEnd) {
+        currentAppTime = contentEnd;
         isAppPlaying = false;
         stopVirtualPlayback();
         playIcon.style.display = 'block';
@@ -103,6 +109,7 @@ function virtualPlayLoop(time) {
     }
 
     updateVirtualPlayhead();
+
     if (isVirtualPlaying) {
         virtualPlayInterval = requestAnimationFrame(virtualPlayLoop);
     }
@@ -152,7 +159,6 @@ function updateVirtualPlayhead() {
             }
         }
 
-        // Hide video visually & mute original audio when inside a removed section
         if (isRemoved || currentAppTime > videoDuration) {
             videoPlayer.style.opacity = '0';
             videoPlayer.volume = 0;
@@ -212,7 +218,9 @@ videoPlayer.addEventListener('pause', () => {
 
 videoPlayer.addEventListener('ended', () => {
     const effectiveVideoEnd = getEffectiveVideoEnd();
-    if (timelineDuration > effectiveVideoEnd) {
+    const contentEnd = getContentEnd();
+
+    if (contentEnd > effectiveVideoEnd) {
         if (isAppPlaying) {
             startVirtualPlayback();
         }
@@ -221,7 +229,6 @@ videoPlayer.addEventListener('ended', () => {
         playIcon.style.display = 'block';
         pauseIcon.style.display = 'none';
         playOverlay.classList.remove('hidden');
-
         stopAllOverlayAudio();
     }
 });
@@ -233,9 +240,11 @@ videoPlayer.addEventListener('timeupdate', () => {
     if (videoDuration > 0 && !videoPlayer.paused) {
         currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
 
+        const contentEnd = getContentEnd();
+
         // Ensure playback stops securely if it hits the cut end limit
-        if (currentAppTime >= timelineDuration) {
-            currentAppTime = timelineDuration;
+        if (currentAppTime >= contentEnd) {
+            currentAppTime = contentEnd;
             isAppPlaying = false;
             videoPlayer.pause();
             playIcon.style.display = 'block';

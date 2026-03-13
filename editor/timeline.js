@@ -35,6 +35,18 @@ function getEffectiveVideoEnd() {
     return getCompressedVideoDuration();
 }
 
+// NEW: Helper function to determine the absolute last second of playable content
+function getContentEnd() {
+    let maxOverlayEnd = 0;
+    for (const track of overlayTracks) {
+        for (const item of track.items) {
+            const end = item.start + item.duration;
+            if (end > maxOverlayEnd) maxOverlayEnd = end;
+        }
+    }
+    return Math.max(getEffectiveVideoEnd(), maxOverlayEnd);
+}
+
 function updateTimelineDuration() {
     let maxOverlayEnd = 0;
     for (const track of overlayTracks) {
@@ -44,9 +56,10 @@ function updateTimelineDuration() {
         }
     }
 
-    let baseDuration = getCompressedVideoDuration() || videoDuration;
+    let baseDuration = videoDuration;
     const targetDuration = Math.max(baseDuration, maxOverlayEnd);
     let finalTarget = targetDuration;
+
     if (typeof draggingOverlayItem !== 'undefined' && (draggingOverlayItem || resizingOverlayItem)) {
         finalTarget = Math.max(timelineDuration, targetDuration);
     }
@@ -55,8 +68,7 @@ function updateTimelineDuration() {
         timelineDuration = finalTarget;
         const scrollContent = document.getElementById('timelineScrollContent');
         if (scrollContent) {
-            const compressedDur = getCompressedVideoDuration() || videoDuration;
-            const widthPct = compressedDur > 0 ? (timelineDuration / compressedDur) * 100 : 100;
+            const widthPct = videoDuration > 0 ? (timelineDuration / videoDuration) * 100 : 100;
             scrollContent.style.width = Math.max(100, widthPct) + '%';
         }
 
@@ -69,6 +81,7 @@ function updateTimelineDuration() {
 
 function addSplit(time) {
     if (videoDuration <= 0) return;
+
     if (time < 0.3 || time > videoDuration - 0.3) {
         showToast('⚠️', 'Cannot split too close to the start or end');
         return;
@@ -83,6 +96,7 @@ function addSplit(time) {
 
     const segments = getSegments();
     let segIdx = segments.length - 1;
+
     for (let i = 0; i < segments.length; i++) {
         if (time >= segments[i].start && time < segments[i].end) {
             segIdx = i;
@@ -91,6 +105,7 @@ function addSplit(time) {
     }
 
     const seg = segments[segIdx];
+
     if (time - seg.start < 0.3 || seg.end - time < 0.3) {
         showToast('⚠️', 'Cannot split too close to an existing split');
         return;
@@ -123,8 +138,8 @@ function renderTimeline() {
 function renderSegments() {
     timelineSegmentsLayer.innerHTML = '';
     const segments = getSegments();
+
     segments.forEach((seg, idx) => {
-        // Skip rendering for removed parts so they leave an empty gap
         if (seg.removed) return;
 
         const tStart = seg.start;
@@ -146,6 +161,7 @@ function renderSegments() {
         tooltip.className = 'segment-tooltip';
         tooltip.textContent = `${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
         el.appendChild(tooltip);
+
         el.addEventListener('click', (e) => {
             if (isDraggingPlayhead) return;
             e.stopPropagation();
@@ -167,12 +183,14 @@ function renderSegments() {
                 selectSegment(idx);
             }
         });
+
         timelineSegmentsLayer.appendChild(el);
     });
 }
 
 function renderSplitMarkers() {
     timelineSplitsLayer.innerHTML = '';
+
     splitPoints.forEach((time) => {
         const isRemovedTime = getSegments().some(s => s.removed && time > s.start && time < s.end);
         if (isRemovedTime) return;
@@ -189,6 +207,7 @@ function renderSplitMarkers() {
 
 function updateControls() {
     const segments = getSegments();
+
     const hasAnySplit = splitPoints.length > 0;
     const hasAnyRemoved = removedFlags.some(f => f);
     const hasSelection = selectedSegIdx !== null;
@@ -201,12 +220,15 @@ function updateControls() {
         const seg = segments[selectedSegIdx];
         const dur = formatDuration(seg.end - seg.start);
         editorInfo.textContent = `Selected section (${dur}) — click "Remove" to cut it out`;
+
     } else if (hasAnyRemoved) {
         const totalRemoved = segments.filter(s => s.removed).reduce((sum, s) => sum + (s.end - s.start), 0);
         const remaining = videoDuration - totalRemoved;
         editorInfo.textContent = `${formatDuration(totalRemoved)} removed · ${formatDuration(remaining)} remaining`;
+
     } else if (hasAnySplit) {
         editorInfo.textContent = `${segments.length} sections — click any section to select it`;
+
     } else {
         editorInfo.textContent = 'Split the timeline, then click any part to remove it';
     }
@@ -216,16 +238,19 @@ function drawWaveform() {
     const canvas = timelineWaveform;
     const ctx = canvas.getContext('2d');
     const rect = timeline.getBoundingClientRect();
+
     canvas.width = rect.width * window.devicePixelRatio;
     canvas.height = rect.height * window.devicePixelRatio;
     canvas.style.width = rect.width + 'px';
     canvas.style.height = rect.height + 'px';
+
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
     const w = rect.width, h = rect.height;
     ctx.clearRect(0, 0, w, h);
 
     const segments = getSegments();
+
     if (videoThumbnails && videoThumbnails.length > 0 && w > 0) {
         const firstThumb = videoThumbnails[0];
         const aspect = firstThumb.bitmap.width / firstThumb.bitmap.height;
@@ -234,7 +259,6 @@ function drawWaveform() {
 
         ctx.save();
         ctx.beginPath();
-        // Uses full timeline video duration
         const videoEnd = videoDuration || 0;
         const videoWidth = timelineDuration > 0 ? (videoEnd / timelineDuration) * w : w;
         ctx.rect(0, 0, videoWidth, h);
@@ -243,7 +267,7 @@ function drawWaveform() {
         for (let x = 0; x < w; x += thumbWidth) {
             const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
             if (barTime > videoEnd) break;
-            // Check if this portion was removed
+
             let isRemoved = false;
             for (const seg of segments) {
                 if (seg.removed && barTime >= seg.start && barTime < seg.end) {
@@ -258,7 +282,6 @@ function drawWaveform() {
             }
 
             if (isRemoved) {
-                // Render an empty black void for removed chunks
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
                 ctx.fillRect(x, 0, drawWidth, thumbHeight);
                 continue;
@@ -285,10 +308,10 @@ function drawWaveform() {
         ctx.restore();
 
     } else {
-        // Render audio bar fallback
         const barCount = Math.floor(w / 4);
         const barWidth = 2;
         const gap = barCount > 1 ? (w - barCount * barWidth) / (barCount - 1) : 0;
+
         for (let i = 0; i < barCount; i++) {
             const x = i * (barWidth + gap);
             if (x + barWidth > w) break;
@@ -304,7 +327,6 @@ function drawWaveform() {
                 }
             }
 
-            // Do not draw waveform bars for deleted segments
             if (isRemoved) continue;
 
             const noise1 = Math.sin(i * 0.15) * 0.3;
@@ -348,7 +370,7 @@ removeSectionBtn.addEventListener('click', () => {
     drawWaveform();
     renderTimeline();
     updateControls();
-    updateVirtualPlayhead(); // Ensures playback skips properly if the playhead was in this area
+    updateVirtualPlayhead();
 });
 
 deselectBtn.addEventListener('click', () => {
