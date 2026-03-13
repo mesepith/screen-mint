@@ -6,8 +6,9 @@ downloadBtn.addEventListener('click', async () => {
 
     const hasAnyRemoved = removedFlags.some(f => f);
     const hasAnyOverlays = overlayTracks.some(t => t.items.length > 0);
+    const hasOffsets = segmentOffsets.some(o => o !== 0);
 
-    if (!hasAnyRemoved && !hasAnyOverlays) {
+    if (!hasAnyRemoved && !hasAnyOverlays && !hasOffsets) {
         downloadBlob(videoBlob, videoFileName);
         showToast('⬇️', 'Downloading original recording…');
         return;
@@ -87,7 +88,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
         tempVideo.preload = 'auto';
         tempVideo.src = url;
 
-        let currentSegIndex = 0;
         let recorder = null;
         let chunks = [];
 
@@ -95,9 +95,8 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
         let mainVideoGain;
         let animFrameId = null;
         let virtualRecordingTime = 0;
-        let isRenderingExtended = false;
-        let extendedStartTime = 0;
-        let lastDrawTime = 0;
+        let finished = false;
+        let encodingTimeout = null;
 
         tempVideo.addEventListener('loadedmetadata', () => {
             setupRecorder();
@@ -140,19 +139,15 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 }
 
                 dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
-
                 const activeExportAudioNodes = new Map();
                 const activeExportAudioIds = new Set();
 
                 canvasStream._syncExportAudio = (appTime) => {
                     const shouldBeActive = new Set();
-
                     for (const ea of exportAudioItems) {
                         const inRange = appTime >= ea.start && appTime < ea.start + ea.duration;
-
                         if (inRange) {
                             shouldBeActive.add(ea.id);
-
                             const playbackOffset = appTime - ea.start;
                             const expectedTime = ea.audioOffset + playbackOffset;
 
@@ -166,14 +161,12 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
                                 const startWhen = audioCtx.currentTime + 0.005;
                                 source.start(startWhen, expectedTime);
-
                                 activeExportAudioNodes.set(ea.id, {
                                     sourceNode: source, gainNode: gain, lastExpectedTime: expectedTime, systemTimeStart: startWhen
                                 });
                                 activeExportAudioIds.add(ea.id);
                             } else {
                                 const nodeInfo = activeExportAudioNodes.get(ea.id);
-
                                 if (nodeInfo) {
                                     nodeInfo.gainNode.gain.value = ea.volume;
                                     const actualNodePlayTime = (audioCtx.currentTime - nodeInfo.systemTimeStart) + nodeInfo.lastExpectedTime;
@@ -234,7 +227,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
 
             recorder = new MediaRecorder(canvasStream, recOptions);
             chunks = [];
-
             recorder.ondataavailable = (e) => {
                 if (e.data && e.data.size > 0) chunks.push(e.data);
             };
@@ -252,13 +244,13 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 reject(new Error('MediaRecorder error'));
             };
 
-            currentSegIndex = 0;
-            seekToSegment(currentSegIndex);
-        }
+            // Start overarching recording once
+            virtualRecordingTime = 0;
+            recorder.start(100);
 
-        let finished = false;
-        let seeking = false;
-        let encodingTimeout = null;
+            // Build the export action plan based on user segments
+            buildAndExecuteExportPlan();
+        }
 
         function finishRecording() {
             if (finished) return;
@@ -266,7 +258,6 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             if (encodingTimeout) clearTimeout(encodingTimeout);
             tempVideo.pause();
             if (animFrameId) cancelAnimationFrame(animFrameId);
-
             if (canvasStream && canvasStream._exportAudioCleanup) {
                 canvasStream._exportAudioCleanup();
             }
@@ -281,180 +272,129 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
             }
         }
 
-        function seekToSegment(idx) {
-            if (finished) return;
-            // Prevent processing any segments extending past our actual export timeline limitation
-            if (idx >= segments.length || segments[idx].start >= exportDuration) {
-                checkAndStartExtendedRendering();
-                return;
+        function buildAndExecuteExportPlan() {
+            const plan = [];
+            let currentTimelineTime = 0;
+
+            const activeSegs = segments.filter(s => !s.removed).sort((a, b) => a.start - b.start);
+
+            for (const seg of activeSegs) {
+                if (seg.start > currentTimelineTime) {
+                    plan.push({ type: 'gap', duration: seg.start - currentTimelineTime });
+                    currentTimelineTime = seg.start;
+                }
+                const clipDuration = seg.end - seg.start;
+                plan.push({
+                    type: 'clip',
+                    videoStart: seg.videoStart,
+                    videoEnd: seg.videoStart + clipDuration,
+                    duration: clipDuration
+                });
+                currentTimelineTime += clipDuration;
             }
 
-            seeking = true;
-            onProgress(`Encoding segment ${idx + 1} of ${segments.length}…`);
+            if (exportDuration > currentTimelineTime) {
+                plan.push({ type: 'gap', duration: exportDuration - currentTimelineTime });
+            }
 
-            const targetTime = segments[idx].start;
+            let planIndex = 0;
 
-            if (Math.abs(tempVideo.currentTime - targetTime) < 0.05) {
-                seeking = false;
-
-                if (recorder && recorder.state === 'inactive') {
-                    recorder.start(100);
-                } else if (recorder && recorder.state === 'paused') {
-                    recorder.resume();
+            function executeNextPlanStep() {
+                if (planIndex >= plan.length || finished) {
+                    finishRecording();
+                    return;
                 }
 
-                tempVideo.play().catch(() => advanceToNextSegment());
-                lastDrawTime = performance.now();
-                drawFrame();
-                return;
-            }
+                const step = plan[planIndex];
+                const progressPct = Math.min(99, Math.floor((virtualRecordingTime / exportDuration) * 100));
 
-            tempVideo.currentTime = targetTime;
-            tempVideo.addEventListener('seeked', function onSeeked() {
-                tempVideo.removeEventListener('seeked', onSeeked);
-                if (finished) return;
-                seeking = false;
+                if (step.type === 'gap') {
+                    onProgress(`Encoding: ${progressPct}%`);
+                    let gapStartAppTime = virtualRecordingTime;
 
-                if (recorder && recorder.state === 'inactive') {
-                    recorder.start(100);
-                } else if (recorder && recorder.state === 'paused') {
-                    recorder.resume();
+                    tempVideo.pause();
+                    if (mainVideoGain) mainVideoGain.gain.value = 0;
+
+                    let gapLastDraw = performance.now();
+                    function drawGap() {
+                        if (finished) return;
+                        const now = performance.now();
+                        const delta = (now - gapLastDraw) / 1000;
+                        gapLastDraw = now;
+
+                        virtualRecordingTime += delta;
+
+                        if (virtualRecordingTime >= gapStartAppTime + step.duration) {
+                            virtualRecordingTime = gapStartAppTime + step.duration;
+                            planIndex++;
+                            executeNextPlanStep();
+                            return;
+                        }
+
+                        ctx.fillStyle = "#000";
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                        syncOverlayVideosForExport(virtualRecordingTime);
+                        drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, virtualRecordingTime);
+                        if (canvasStream && canvasStream._syncExportAudio) canvasStream._syncExportAudio(virtualRecordingTime);
+
+                        animFrameId = requestAnimationFrame(drawGap);
+                    }
+                    drawGap();
                 }
+                else if (step.type === 'clip') {
+                    onProgress(`Encoding: ${progressPct}%`);
+                    let clipStartAppTime = virtualRecordingTime;
 
-                tempVideo.play().catch(() => advanceToNextSegment());
-                lastDrawTime = performance.now();
-                drawFrame();
-            }, { once: true });
-        }
+                    if (Math.abs(tempVideo.currentTime - step.videoStart) > 0.1) {
+                        tempVideo.currentTime = step.videoStart;
+                        tempVideo.addEventListener('seeked', function onSeek() {
+                            tempVideo.removeEventListener('seeked', onSeek);
+                            startClipRender();
+                        }, { once: true });
+                    } else {
+                        startClipRender();
+                    }
 
-        function checkAndStartExtendedRendering() {
-            let writtenContentTime = videoDuration;
-            if (exportDuration > writtenContentTime) {
-                onProgress(`Encoding extended timeline…`);
-                isRenderingExtended = true;
-                extendedStartTime = performance.now();
-                lastDrawTime = extendedStartTime;
+                    function startClipRender() {
+                        if (finished) return;
+                        if (mainVideoGain) mainVideoGain.gain.value = 1;
+                        tempVideo.play().catch(() => { });
 
-                if (recorder && recorder.state === 'inactive') {
-                    recorder.start(100);
-                } else if (recorder && recorder.state === 'paused') {
-                    recorder.resume();
+                        let clipLastDraw = performance.now();
+
+                        function drawClip() {
+                            if (finished) return;
+
+                            if (tempVideo.paused || tempVideo.currentTime >= step.videoEnd) {
+                                tempVideo.pause();
+                                virtualRecordingTime = clipStartAppTime + step.duration;
+                                planIndex++;
+                                executeNextPlanStep();
+                                return;
+                            }
+
+                            const now = performance.now();
+                            const delta = (now - clipLastDraw) / 1000;
+                            clipLastDraw = now;
+                            virtualRecordingTime += delta;
+
+                            ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+
+                            syncOverlayVideosForExport(virtualRecordingTime);
+                            drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, virtualRecordingTime);
+                            if (canvasStream && canvasStream._syncExportAudio) canvasStream._syncExportAudio(virtualRecordingTime);
+
+                            animFrameId = requestAnimationFrame(drawClip);
+                        }
+                        drawClip();
+                    }
                 }
-                tempVideo.pause();
-                drawExtendedFrame();
-            } else {
-                finishRecording();
             }
+
+            // Fire off the first step
+            executeNextPlanStep();
         }
-
-        function advanceToNextSegment() {
-            if (finished || seeking || isRenderingExtended) return;
-            tempVideo.pause();
-
-            if (recorder && recorder.state === 'recording') {
-                recorder.pause();
-            }
-
-            currentSegIndex++;
-            // Force end loop early to avoid drawing black frames for completely cropped end segments
-            if (currentSegIndex < segments.length && segments[currentSegIndex].start >= exportDuration) {
-                currentSegIndex = segments.length;
-            }
-
-            if (currentSegIndex >= segments.length) {
-                checkAndStartExtendedRendering();
-            } else {
-                seekToSegment(currentSegIndex);
-            }
-        }
-
-        function drawExtendedFrame() {
-            if (finished) return;
-            const now = performance.now();
-            const deltaSec = (now - lastDrawTime) / 1000;
-            lastDrawTime = now;
-
-            virtualRecordingTime += deltaSec;
-            let totalVideoWritten = videoDuration;
-            const currentExtAppTime = totalVideoWritten + (virtualRecordingTime - totalVideoWritten);
-
-            if (currentExtAppTime >= exportDuration) {
-                finishRecording();
-                return;
-            }
-
-            ctx.fillStyle = "#000";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            try {
-                syncOverlayVideosForExport(currentExtAppTime);
-                drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, currentExtAppTime);
-            } catch (e) { console.warn('Overlay draw error:', e); }
-
-            if (canvasStream && canvasStream._syncExportAudio) {
-                canvasStream._syncExportAudio(currentExtAppTime);
-            }
-            animFrameId = requestAnimationFrame(drawExtendedFrame);
-        }
-
-        function drawFrame() {
-            if (finished || seeking || currentSegIndex >= segments.length || isRenderingExtended) return;
-            const seg = segments[currentSegIndex];
-            if (!seg) { checkAndStartExtendedRendering(); return; }
-
-            // Instantly break render sequence if reaching the clipped limit
-            if (tempVideo.paused || tempVideo.ended || tempVideo.currentTime >= seg.end - 0.03 || tempVideo.currentTime >= exportDuration) {
-                advanceToNextSegment();
-                return;
-            }
-
-            const now = performance.now();
-            const deltaSec = (now - lastDrawTime) / 1000;
-            lastDrawTime = now;
-            virtualRecordingTime += deltaSec;
-
-            if (seg.removed) {
-                // Render an empty black void for removed chunks
-                ctx.fillStyle = "#000";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                if (mainVideoGain) mainVideoGain.gain.value = 0;
-            } else {
-                ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
-                if (mainVideoGain) mainVideoGain.gain.value = 1;
-            }
-
-            try {
-                syncOverlayVideosForExport(tempVideo.currentTime);
-                drawOverlaysOnCanvas(ctx, canvas.width, canvas.height, tempVideo.currentTime);
-            } catch (e) { console.warn('Overlay draw error:', e); }
-
-            if (canvasStream && canvasStream._syncExportAudio) {
-                canvasStream._syncExportAudio(tempVideo.currentTime);
-            }
-            animFrameId = requestAnimationFrame(drawFrame);
-        }
-
-        tempVideo.addEventListener('timeupdate', () => {
-            if (finished || seeking || currentSegIndex >= segments.length || isRenderingExtended) return;
-
-            // Abort progressing further if past the crop threshold during timeupdate
-            if (tempVideo.currentTime >= exportDuration) {
-                advanceToNextSegment();
-                return;
-            }
-
-            const seg = segments[currentSegIndex];
-            if (!seg) return;
-            if (tempVideo.currentTime >= seg.end) {
-                advanceToNextSegment();
-            }
-        });
-
-        tempVideo.addEventListener('ended', () => {
-            if (!finished && !isRenderingExtended) {
-                advanceToNextSegment();
-            }
-        });
 
         encodingTimeout = setTimeout(() => {
             if (!finished) {
@@ -462,6 +402,5 @@ function encodeSegments(blob, segments, exportDuration, onProgress) {
                 finishRecording();
             }
         }, 5 * 60 * 1000);
-
     });
 }

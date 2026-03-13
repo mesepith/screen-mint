@@ -3,27 +3,53 @@
 
 function getSegments() {
     const pts = [0, ...splitPoints, videoDuration];
-    return pts.slice(0, -1).map((start, i) => ({
-        index: i,
-        start: start,
-        end: pts[i + 1],
-        removed: removedFlags[i] || false
-    }));
+    return pts.slice(0, -1).map((start, i) => {
+        const offset = segmentOffsets[i] || 0;
+        return {
+            index: i,
+            videoStart: start,
+            videoEnd: pts[i + 1],
+            start: start + offset,
+            end: pts[i + 1] + offset,
+            removed: removedFlags[i] || false
+        };
+    });
 }
 
-// Ensure 1:1 time mapping without compressing removed segments
 function videoToTimelineTime(vTime) {
+    const segments = getSegments();
+    for (const seg of segments) {
+        if (vTime >= seg.videoStart && vTime <= seg.videoEnd) {
+            return seg.start + (vTime - seg.videoStart);
+        }
+    }
     return vTime || 0;
 }
 
 function timelineToVideoTime(tTime) {
-    return tTime || 0;
+    const segments = getSegments();
+
+    // 1. Prioritize active segments
+    for (const seg of segments) {
+        if (!seg.removed && tTime >= seg.start && tTime <= seg.end) {
+            return seg.videoStart + (tTime - seg.start);
+        }
+    }
+
+    // 2. Fallback for empty gaps: Lock to the closest valid active frame
+    let lastVTime = 0;
+    for (const seg of segments) {
+        if (!seg.removed) {
+            if (tTime < seg.start) return seg.videoStart;
+            lastVTime = seg.videoEnd;
+        }
+    }
+    return lastVTime;
 }
 
 function getCompressedVideoDuration() {
-    const segments = getSegments();
     let maxEnd = 0;
-    for (const seg of segments) {
+    for (const seg of getSegments()) {
         if (!seg.removed && seg.end > maxEnd) {
             maxEnd = seg.end;
         }
@@ -35,7 +61,6 @@ function getEffectiveVideoEnd() {
     return getCompressedVideoDuration();
 }
 
-// Helper function to determine the absolute last second of playable content
 function getContentEnd() {
     let maxOverlayEnd = 0;
     for (const track of overlayTracks) {
@@ -56,11 +81,19 @@ function updateTimelineDuration() {
         }
     }
 
+    // FIX: Anchor baseDuration to the original videoDuration so the timeline scale doesn't violently shrink when deleting/dragging
     let baseDuration = videoDuration;
+    for (const seg of getSegments()) {
+        if (seg.end > baseDuration) baseDuration = seg.end;
+    }
+
     const targetDuration = Math.max(baseDuration, maxOverlayEnd);
     let finalTarget = targetDuration;
 
     if (typeof draggingOverlayItem !== 'undefined' && (draggingOverlayItem || resizingOverlayItem)) {
+        finalTarget = Math.max(timelineDuration, targetDuration);
+    }
+    if (typeof isDraggingSegment !== 'undefined' && isDraggingSegment) {
         finalTarget = Math.max(timelineDuration, targetDuration);
     }
 
@@ -81,7 +114,6 @@ function updateTimelineDuration() {
 
 function addSplit(time) {
     if (videoDuration <= 0) return;
-
     if (time < 0.3 || time > videoDuration - 0.3) {
         showToast('⚠️', 'Cannot split too close to the start or end');
         return;
@@ -96,27 +128,28 @@ function addSplit(time) {
 
     const segments = getSegments();
     let segIdx = segments.length - 1;
-
     for (let i = 0; i < segments.length; i++) {
-        if (time >= segments[i].start && time < segments[i].end) {
+        if (time >= segments[i].videoStart && time < segments[i].videoEnd) {
             segIdx = i;
             break;
         }
     }
 
     const seg = segments[segIdx];
-
-    if (time - seg.start < 0.3 || seg.end - time < 0.3) {
+    if (time - seg.videoStart < 0.3 || seg.videoEnd - time < 0.3) {
         showToast('⚠️', 'Cannot split too close to an existing split');
         return;
     }
 
     const wasRemoved = removedFlags[segIdx] || false;
+    const currentOffset = segmentOffsets[segIdx] || 0;
+
     saveUndoState();
 
     splitPoints.push(time);
     splitPoints.sort((a, b) => a - b);
     removedFlags.splice(segIdx, 1, wasRemoved, wasRemoved);
+    segmentOffsets.splice(segIdx, 1, currentOffset, currentOffset);
 
     selectedSegIdx = null;
     renderTimeline();
@@ -143,13 +176,10 @@ function renderSegments() {
         if (seg.removed) return;
 
         const tStart = seg.start;
-        if (tStart >= timelineDuration) return;
-
-        const renderEnd = Math.min(seg.end, timelineDuration);
-        const tEnd = renderEnd;
+        const renderEnd = seg.end;
 
         const leftPct = timelineDuration > 0 ? (tStart / timelineDuration) * 100 : 0;
-        const widthPct = timelineDuration > 0 ? ((tEnd - tStart) / timelineDuration) * 100 : 0;
+        const widthPct = timelineDuration > 0 ? ((renderEnd - tStart) / timelineDuration) * 100 : 0;
 
         const el = document.createElement('div');
         el.className = 'segment-overlay';
@@ -162,7 +192,23 @@ function renderSegments() {
         tooltip.textContent = `${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)} (${formatDuration(seg.end - seg.start)})`;
         el.appendChild(tooltip);
 
+        el.addEventListener('mousedown', (e) => {
+            if (isDraggingPlayhead) return;
+
+            isDraggingSegment = {
+                index: idx,
+                startX: e.clientX,
+                origOffset: segmentOffsets[idx] || 0,
+                rect: timeline.getBoundingClientRect(),
+                hasMoved: false
+            };
+        });
+
         el.addEventListener('click', (e) => {
+            if (isDraggingSegment && isDraggingSegment.hasMoved) {
+                e.stopPropagation();
+                return;
+            }
             if (isDraggingPlayhead) return;
             e.stopPropagation();
 
@@ -171,7 +217,7 @@ function renderSegments() {
             const clickTime = pct * timelineDuration;
             const clickTimeVideo = timelineToVideoTime(clickTime);
 
-            seekTo(clickTimeVideo);
+            seekTo(clickTime);
             videoToolbar.classList.remove('hidden');
 
             showInlineCutMenu(e.clientX, rect, {
@@ -188,11 +234,41 @@ function renderSegments() {
     });
 }
 
+// Global Handlers for Dragging Main Segments
+document.addEventListener('mousemove', (e) => {
+    if (isDraggingSegment) {
+        const dx = e.clientX - isDraggingSegment.startX;
+        if (Math.abs(dx) > 3) isDraggingSegment.hasMoved = true;
+
+        let deltaSec = (dx / isDraggingSegment.rect.width) * timelineDuration;
+
+        const seg = getSegments()[isDraggingSegment.index];
+        const newStart = seg.videoStart + isDraggingSegment.origOffset + deltaSec;
+
+        // Block dragging before time 0
+        if (newStart < 0) {
+            deltaSec = -seg.videoStart - isDraggingSegment.origOffset;
+        }
+
+        segmentOffsets[isDraggingSegment.index] = isDraggingSegment.origOffset + deltaSec;
+
+        renderSegments();
+        drawWaveform();
+        updateTimelineDuration();
+    }
+});
+
+document.addEventListener('mouseup', () => {
+    if (isDraggingSegment) {
+        isDraggingSegment = null;
+        updateTimelineDuration();
+    }
+});
+
 function renderSplitMarkers() {
     timelineSplitsLayer.innerHTML = '';
-
     splitPoints.forEach((time) => {
-        const isRemovedTime = getSegments().some(s => s.removed && time > s.start && time < s.end);
+        const isRemovedTime = getSegments().some(s => s.removed && time > s.videoStart && time < s.videoEnd);
         if (isRemovedTime) return;
 
         const tTime = videoToTimelineTime(time);
@@ -200,14 +276,12 @@ function renderSplitMarkers() {
         const marker = document.createElement('div');
         marker.className = 'split-marker';
         marker.style.left = pct + '%';
-
         timelineSplitsLayer.appendChild(marker);
     });
 }
 
 function updateControls() {
     const segments = getSegments();
-
     const hasAnySplit = splitPoints.length > 0;
     const hasAnyRemoved = removedFlags.some(f => f);
     const hasSelection = selectedSegIdx !== null;
@@ -220,15 +294,12 @@ function updateControls() {
         const seg = segments[selectedSegIdx];
         const dur = formatDuration(seg.end - seg.start);
         editorInfo.textContent = `Selected section (${dur}) — click "Remove" to cut it out`;
-
     } else if (hasAnyRemoved) {
-        const totalRemoved = segments.filter(s => s.removed).reduce((sum, s) => sum + (s.end - s.start), 0);
+        const totalRemoved = segments.filter(s => s.removed).reduce((sum, s) => sum + (s.videoEnd - s.videoStart), 0);
         const remaining = videoDuration - totalRemoved;
         editorInfo.textContent = `${formatDuration(totalRemoved)} removed · ${formatDuration(remaining)} remaining`;
-
     } else if (hasAnySplit) {
         editorInfo.textContent = `${segments.length} sections — click any section to select it`;
-
     } else {
         editorInfo.textContent = 'Split the timeline, then click any part to remove it';
     }
@@ -259,50 +330,49 @@ function drawWaveform() {
 
         ctx.save();
         ctx.beginPath();
-        const videoEnd = videoDuration || 0;
-        const videoWidth = timelineDuration > 0 ? (videoEnd / timelineDuration) * w : w;
-        ctx.rect(0, 0, videoWidth, h);
+
+        // Clipping map strictly to existing active bounds
+        for (const seg of segments) {
+            if (!seg.removed) {
+                const segStartX = timelineDuration > 0 ? (seg.start / timelineDuration) * w : 0;
+                const segEndX = timelineDuration > 0 ? (seg.end / timelineDuration) * w : 0;
+                ctx.rect(segStartX, 0, segEndX - segStartX, h);
+            }
+        }
         ctx.clip();
 
-        // 1. Draw ALL thumbnails without checking if they are removed yet
-        for (let x = 0; x < w; x += thumbWidth) {
-            const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
-            if (barTime > videoEnd) break;
+        for (const seg of segments) {
+            if (seg.removed) continue;
 
-            let drawWidth = thumbWidth;
-            if (x + thumbWidth > w) {
-                drawWidth = w - x;
-            }
+            const segStartX = timelineDuration > 0 ? (seg.start / timelineDuration) * w : 0;
+            const segEndX = timelineDuration > 0 ? (seg.end / timelineDuration) * w : 0;
 
-            let closestThumb = videoThumbnails[0];
-            let minDiff = Infinity;
+            for (let x = segStartX; x < segEndX; x += thumbWidth) {
+                const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
+                const vTime = timelineToVideoTime(barTime);
 
-            for (const thumb of videoThumbnails) {
-                const diff = Math.abs(thumb.time - barTime);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closestThumb = thumb;
+                let drawWidth = thumbWidth;
+                if (x + thumbWidth > segEndX) drawWidth = segEndX - x;
+
+                let closestThumb = videoThumbnails[0];
+                let minDiff = Infinity;
+                for (const thumb of videoThumbnails) {
+                    const diff = Math.abs(thumb.time - vTime);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestThumb = thumb;
+                    }
+                }
+
+                if (drawWidth > 0 && closestThumb) {
+                    ctx.drawImage(closestThumb.bitmap, x, 0, drawWidth, thumbHeight);
                 }
             }
-
-            if (drawWidth > 0) {
-                ctx.drawImage(closestThumb.bitmap, x, 0, drawWidth, thumbHeight);
-            }
         }
 
-        // 2. Dim everything slightly
+        // Dim slightly
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.fillRect(0, 0, w, h);
-
-        // 3. Do a pixel-perfect erasure of the precise removed timeline segments
-        for (const seg of segments) {
-            if (seg.removed) {
-                const startX = timelineDuration > 0 ? (seg.start / timelineDuration) * w : 0;
-                const endX = timelineDuration > 0 ? (seg.end / timelineDuration) * w : 0;
-                ctx.clearRect(startX, 0, endX - startX, h);
-            }
-        }
-
         ctx.restore();
 
     } else {
@@ -315,12 +385,11 @@ function drawWaveform() {
             if (x + barWidth > w) break;
 
             const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
-            if (barTime > videoDuration) continue;
 
-            let isRemoved = false;
+            let isRemoved = true;
             for (const seg of segments) {
-                if (seg.removed && barTime >= seg.start && barTime < seg.end) {
-                    isRemoved = true;
+                if (!seg.removed && barTime >= seg.start && barTime <= seg.end) {
+                    isRemoved = false;
                     break;
                 }
             }
@@ -361,7 +430,7 @@ removeSectionBtn.addEventListener('click', () => {
     removedFlags[selectedSegIdx] = true;
 
     const seg = getSegments()[selectedSegIdx];
-    showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
+    showToast('🗑️', `Removed ${formatTimePrecise(seg.videoStart)} → ${formatTimePrecise(seg.videoEnd)}`);
 
     selectedSegIdx = null;
     updateTimelineDuration();
@@ -382,7 +451,9 @@ resetAllBtn.addEventListener('click', () => {
     saveUndoState();
     splitPoints = [];
     removedFlags = [false];
+    segmentOffsets = [0];
     selectedSegIdx = null;
+
     updateTimelineDuration();
     renderTimeline();
     updateControls();

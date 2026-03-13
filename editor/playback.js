@@ -1,69 +1,35 @@
-// ========== ./editor/playback.js ==========
 'use strict';
 
 function togglePlay() {
     if (isAppPlaying) {
         isAppPlaying = false;
-        videoPlayer.pause();
-        stopVirtualPlayback();
+        stopVirtualPlayback(); // Virtual loop manages the native node
         playIcon.style.display = 'block';
         pauseIcon.style.display = 'none';
         playOverlay.classList.remove('hidden');
+        videoToolbar.classList.remove('hidden');
     } else {
         isAppPlaying = true;
         const contentEnd = getContentEnd();
 
-        // If user clicks play while playhead is at or past the end of the content, restart.
         if (currentAppTime >= contentEnd) {
             currentAppTime = 0;
-            videoPlayer.currentTime = 0;
         }
 
         ensureAudioContextReady().then(() => {
             syncOverlayAudio(currentAppTime);
         });
 
-        const effectiveVideoEnd = getEffectiveVideoEnd();
-        if (currentAppTime < effectiveVideoEnd) {
-            stopVirtualPlayback();
-            videoPlayer.play();
-            playIcon.style.display = 'none';
-            pauseIcon.style.display = 'block';
-            playOverlay.classList.add('hidden');
-            videoToolbar.classList.add('hidden');
-        } else {
-            videoPlayer.pause();
-            startVirtualPlayback();
-            playIcon.style.display = 'none';
-            pauseIcon.style.display = 'block';
-            playOverlay.classList.add('hidden');
-            videoToolbar.classList.add('hidden');
-        }
+        startVirtualPlayback(); // Use strictly centralized virtual loop
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = 'block';
+        playOverlay.classList.add('hidden');
+        videoToolbar.classList.add('hidden');
     }
 }
 
 function seekTo(targetTime) {
     currentAppTime = targetTime;
-    const effectiveVideoEnd = getEffectiveVideoEnd();
-
-    if (currentAppTime < effectiveVideoEnd) {
-        videoPlayer.currentTime = timelineToVideoTime(currentAppTime);
-        if (isAppPlaying) {
-            videoPlayer.play();
-            stopVirtualPlayback();
-        } else {
-            videoPlayer.pause();
-            stopVirtualPlayback();
-        }
-    } else {
-        videoPlayer.currentTime = timelineToVideoTime(effectiveVideoEnd);
-        videoPlayer.pause();
-        if (isAppPlaying) {
-            startVirtualPlayback();
-        } else {
-            stopVirtualPlayback();
-        }
-    }
     updateVirtualPlayhead();
 }
 
@@ -80,9 +46,11 @@ function stopVirtualPlayback() {
 
     playIcon.style.display = 'block';
     pauseIcon.style.display = 'none';
-    if (videoPlayer.paused) {
-        playOverlay.classList.remove('hidden');
+    if (!videoPlayer.paused) {
+        videoPlayer.pause();
     }
+
+    playOverlay.classList.remove('hidden');
     stopAllOverlayAudio();
 
     for (const key in overlayVideoCache) {
@@ -94,11 +62,10 @@ function virtualPlayLoop(time) {
     if (!isVirtualPlaying) return;
     const deltaSec = (time - lastRenderTime) / 1000;
     lastRenderTime = time;
-
     currentAppTime += deltaSec;
+
     const contentEnd = getContentEnd();
 
-    // Stop virtual playhead when it passes the actual end of content
     if (currentAppTime >= contentEnd) {
         currentAppTime = contentEnd;
         isAppPlaying = false;
@@ -109,7 +76,6 @@ function virtualPlayLoop(time) {
     }
 
     updateVirtualPlayhead();
-
     if (isVirtualPlaying) {
         virtualPlayInterval = requestAnimationFrame(virtualPlayLoop);
     }
@@ -150,45 +116,45 @@ function updateVirtualPlayhead() {
         progressFilled.style.width = pct + '%';
         timelinePlayhead.style.left = pct + '%';
 
-        let isRemoved = false;
+        let isRemoved = true;
+        let targetVideoTime = currentAppTime;
+
         const segments = getSegments();
         for (const seg of segments) {
-            if (seg.removed && currentAppTime >= seg.start && currentAppTime < seg.end) {
-                isRemoved = true;
+            if (!seg.removed && currentAppTime >= seg.start && currentAppTime <= seg.end) {
+                isRemoved = false;
+                targetVideoTime = seg.videoStart + (currentAppTime - seg.start);
                 break;
             }
         }
 
-        if (isRemoved || currentAppTime > videoDuration) {
+        if (isRemoved || currentAppTime > timelineDuration) {
             videoPlayer.style.opacity = '0';
             videoPlayer.volume = 0;
+            if (!videoPlayer.paused) videoPlayer.pause();
         } else {
             videoPlayer.style.opacity = '1';
             videoPlayer.volume = parseFloat(volumeSlider.value);
+
+            if (isVirtualPlaying) {
+                if (Math.abs(videoPlayer.currentTime - targetVideoTime) > 0.2) {
+                    videoPlayer.currentTime = targetVideoTime;
+                }
+                if (videoPlayer.paused) videoPlayer.play().catch(() => { });
+            } else {
+                if (Math.abs(videoPlayer.currentTime - targetVideoTime) > 0.05) {
+                    videoPlayer.currentTime = targetVideoTime;
+                }
+                if (!videoPlayer.paused) videoPlayer.pause();
+            }
         }
 
         renderOverlayPreview(currentAppTime);
         updateLanePlayheads(pct);
         syncOverlayAudio(currentAppTime);
-        syncOverlayVideos(currentAppTime, isAppPlaying || isVirtualPlaying);
+        syncOverlayVideos(currentAppTime, isVirtualPlaying);
     }
     updateTimeDisplay();
-}
-
-function startVideoSyncLoop() {
-    if (!isAppPlaying || isVirtualPlaying) return;
-    if (videoDuration > 0 && !videoPlayer.paused) {
-        syncOverlayAudio(videoPlayer.currentTime);
-        syncOverlayVideos(videoPlayer.currentTime, true);
-    }
-    videoSyncRAF = requestAnimationFrame(startVideoSyncLoop);
-}
-
-function stopVideoSyncLoop() {
-    if (videoSyncRAF) {
-        cancelAnimationFrame(videoSyncRAF);
-        videoSyncRAF = null;
-    }
 }
 
 function getTimeFromPointer(e) {
@@ -198,88 +164,11 @@ function getTimeFromPointer(e) {
     return pct * timelineDuration;
 }
 
-// ── Native Video Events ──
-videoPlayer.addEventListener('play', () => {
-    playIcon.style.display = 'none';
-    pauseIcon.style.display = 'block';
-    playOverlay.classList.add('hidden');
-    videoToolbar.classList.add('hidden');
-    startVideoSyncLoop();
-});
-
-videoPlayer.addEventListener('pause', () => {
-    stopVideoSyncLoop();
-    if (!isVirtualPlaying && !isAppPlaying) {
-        playIcon.style.display = 'block';
-        pauseIcon.style.display = 'none';
-        playOverlay.classList.remove('hidden');
-    }
-});
-
-videoPlayer.addEventListener('ended', () => {
-    const effectiveVideoEnd = getEffectiveVideoEnd();
-    const contentEnd = getContentEnd();
-
-    if (contentEnd > effectiveVideoEnd) {
-        if (isAppPlaying) {
-            startVirtualPlayback();
-        }
-    } else {
-        isAppPlaying = false;
-        playIcon.style.display = 'block';
-        pauseIcon.style.display = 'none';
-        playOverlay.classList.remove('hidden');
-        stopAllOverlayAudio();
-    }
-});
-
-videoPlayer.addEventListener('timeupdate', () => {
-    if (isVirtualPlaying || isDraggingPlayhead) return;
-    if (!isAppPlaying && currentAppTime >= videoDuration) return;
-
-    if (videoDuration > 0 && !videoPlayer.paused) {
-        currentAppTime = videoToTimelineTime(videoPlayer.currentTime);
-
-        const contentEnd = getContentEnd();
-
-        // Ensure playback stops securely if it hits the cut end limit
-        if (currentAppTime >= contentEnd) {
-            currentAppTime = contentEnd;
-            isAppPlaying = false;
-            videoPlayer.pause();
-            playIcon.style.display = 'block';
-            pauseIcon.style.display = 'none';
-            playOverlay.classList.remove('hidden');
-            stopAllOverlayAudio();
-        }
-
-        const pct = timelineDuration > 0 ? (currentAppTime / timelineDuration) * 100 : 0;
-        progressFilled.style.width = pct + '%';
-        timelinePlayhead.style.left = pct + '%';
-
-        let isRemoved = false;
-
-        const segments = getSegments();
-        for (const seg of segments) {
-            if (seg.removed && currentAppTime >= seg.start && currentAppTime < seg.end) {
-                isRemoved = true;
-                break;
-            }
-        }
-
-        if (isRemoved || currentAppTime > videoDuration) {
-            videoPlayer.style.opacity = '0';
-            videoPlayer.volume = 0;
-        } else {
-            videoPlayer.style.opacity = '1';
-            videoPlayer.volume = parseFloat(volumeSlider.value);
-        }
-
-        renderOverlayPreview(currentAppTime);
-        updateLanePlayheads(pct);
-    }
-    updateTimeDisplay();
-});
+// Muting native playback loops completely - we rely entirely on the precise virtual play loop
+videoPlayer.addEventListener('timeupdate', () => { });
+videoPlayer.addEventListener('play', () => { });
+videoPlayer.addEventListener('pause', () => { });
+videoPlayer.addEventListener('ended', () => { });
 
 // ── UI Playback Interactions ──
 playOverlay.addEventListener('click', togglePlay);
@@ -287,10 +176,8 @@ playPauseBtn.addEventListener('click', togglePlay);
 
 stopBtn.addEventListener('click', () => {
     isAppPlaying = false;
-    videoPlayer.pause();
     stopVirtualPlayback();
     currentAppTime = 0;
-    videoPlayer.currentTime = 0;
     updateVirtualPlayhead();
 });
 
@@ -306,7 +193,6 @@ timelinePlayhead.addEventListener('mousedown', (e) => {
     isDraggingPlayhead = true;
     wasPlayingBeforeDrag = isAppPlaying;
     isAppPlaying = false;
-    videoPlayer.pause();
     stopVirtualPlayback();
     document.body.style.cursor = 'grabbing';
     document.body.style.userSelect = 'none';
@@ -317,7 +203,6 @@ timelinePlayhead.addEventListener('touchstart', (e) => {
     isDraggingPlayhead = true;
     wasPlayingBeforeDrag = isAppPlaying;
     isAppPlaying = false;
-    videoPlayer.pause();
     stopVirtualPlayback();
 }, { passive: true });
 
@@ -351,7 +236,7 @@ timeline.addEventListener('click', (e) => {
     if (isDraggingPlayhead) return;
     const rect = timeline.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    seekTo(timelineToVideoTime(pct * timelineDuration));
+    seekTo(pct * timelineDuration);
     videoToolbar.classList.remove('hidden');
 });
 
@@ -381,5 +266,5 @@ videoSizeSlider.addEventListener('input', () => {
 
 videoSizeSlider.addEventListener('change', () => {
     resizeOverlayCanvas();
-    renderOverlayPreview(videoPlayer.currentTime);
+    renderOverlayPreview(currentAppTime);
 });

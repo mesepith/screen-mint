@@ -4,6 +4,7 @@ function saveUndoState() {
     undoStack.push({
         splitPoints: [...splitPoints],
         removedFlags: [...removedFlags],
+        segmentOffsets: [...segmentOffsets],
         overlayTracks: JSON.parse(JSON.stringify(overlayTracks))
     });
     if (undoStack.length > 20) undoStack.shift();
@@ -17,6 +18,7 @@ function undo() {
     const state = undoStack.pop();
     splitPoints = state.splitPoints;
     removedFlags = state.removedFlags;
+    segmentOffsets = state.segmentOffsets || [0];
 
     if (state.overlayTracks) {
         stopAllOverlayAudio();
@@ -25,7 +27,6 @@ function undo() {
         }
 
         overlayTracks = state.overlayTracks;
-
         for (const track of overlayTracks) {
             for (const item of track.items) {
                 if (item.type === 'audio' && item.audioSrc && !overlayAudioBuffers[item.id]) {
@@ -48,11 +49,11 @@ function undo() {
     }
 
     selectedSegIdx = null;
+    updateTimelineDuration();
     renderTimeline();
     updateControls();
     renderOverlayTracks();
     renderOverlayPreview(currentAppTime);
-    updateTimelineDuration();
     drawWaveform();
     showToast('↩️', 'Undone');
 }

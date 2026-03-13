@@ -70,8 +70,10 @@ let videoThumbnails = [];
 // Split & delete state
 let splitPoints = [];
 let removedFlags = [];
+let segmentOffsets = [0]; // Tracks timeline offsets for each video segment
 let selectedSegIdx = null;
 let isDraggingPlayhead = false;
+let isDraggingSegment = null; // Tracks segment dragging on the timeline
 let undoStack = [];
 
 // Overlay Tracks State
