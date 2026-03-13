@@ -93,9 +93,14 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 
     if (message.type === 'recording-failed') {
-        console.error('Recording failed in offscreen:', message.error);
-        isRecording = false;
+        // Check if it's just a normal cancellation
+        if (message.error === 'User cancelled screen selection') {
+            console.log('Recording cancelled by user in offscreen document.');
+        } else {
+            console.error('Recording failed in offscreen:', message.error);
+        }
 
+        isRecording = false;
         chrome.runtime.sendMessage({ action: 'recordingFailed' }).catch(() => { });
     }
 });

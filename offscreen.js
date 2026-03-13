@@ -128,10 +128,17 @@ async function startRecording() {
         });
 
     } catch (error) {
-        console.error('Error starting recording:', error.name, error.message);
 
         // NotAllowedError = user denied/cancelled the picker
         const userCancelled = error.name === 'NotAllowedError';
+
+        // Only log an actual error if it wasn't a standard user cancellation
+        if (userCancelled) {
+            console.log('User cancelled the screen share picker.');
+        } else {
+            console.error('Error starting recording:', error.name, error.message);
+        }
+
         let errorMessage = `${error.name}: ${error.message}`;
 
         if (error.name === 'NotReadableError') {
@@ -145,6 +152,7 @@ async function startRecording() {
             target: 'background',
             error: errorMessage
         });
+
     }
 }
 
