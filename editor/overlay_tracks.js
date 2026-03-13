@@ -19,7 +19,7 @@ function addTrack() {
 function removeTrack(trackId) {
     overlayTracks = overlayTracks.filter(t => t.id !== trackId);
     renderOverlayTracks();
-    renderOverlayPreview(videoPlayer.currentTime);
+    renderOverlayPreview(currentAppTime);
     showToast('🗑️', 'Track removed');
 }
 
@@ -36,7 +36,7 @@ function getOverlayItem(trackId, itemId) {
 function addTextOverlay(trackId, startTime = null) {
     const track = getTrack(trackId);
     if (!track) return;
-    const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
+    const start = startTime !== null ? startTime : (currentAppTime || 0);
     const item = {
         id: generateOverlayId(), type: 'text', start: start,
         duration: 3, content: 'Text', fontSize: 32,
@@ -68,7 +68,7 @@ function addImageOverlay(trackId, startTime = null) {
             const img = new Image();
             img.onload = () => {
                 const id = generateOverlayId();
-                const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
+                const start = startTime !== null ? startTime : (currentAppTime || 0);
                 const item = {
                     id, type: 'image', start: start,
                     duration: 5, imageSrc: ev.target.result,
@@ -112,7 +112,7 @@ function addAudioOverlay(trackId, startTime = null) {
             audio.src = ev.target.result;
             audio.addEventListener('loadedmetadata', () => {
                 const id = generateOverlayId();
-                const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
+                const start = startTime !== null ? startTime : (currentAppTime || 0);
                 const audioDuration = isFinite(audio.duration) ? audio.duration : 5;
                 const item = {
                     id, type: 'audio', start: start,
@@ -153,30 +153,26 @@ function addVideoOverlay(trackId, startTime = null) {
     input.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
-        // Generate a blob URL for optimal memory usage rather than base64
         const fileUrl = URL.createObjectURL(file);
         const vid = document.createElement('video');
         vid.src = fileUrl;
-        vid.muted = true; // Audio is handled via our precise AudioContext system
+        vid.muted = true;
         vid.playsInline = true;
-
         vid.onloadedmetadata = () => {
             const id = generateOverlayId();
-            const start = startTime !== null ? startTime : (videoPlayer.currentTime || 0);
+            const start = startTime !== null ? startTime : (currentAppTime || 0);
             const dur = isFinite(vid.duration) ? vid.duration : 5;
             const item = {
                 id, type: 'video', start: start,
                 duration: dur, videoSrc: fileUrl,
                 videoName: file.name.replace(/\.[^/.]+$/, ''),
                 videoWidth: 30, imageHeight: 0,
-                imageWidth: 30, // Using imageWidth to synchronize properly with interaction box bounds
+                imageWidth: 30,
                 videoOffset: 0, volume: 100,
                 x: 50, y: 50, opacity: 100
             };
             const videoAspect = (videoPlayer.videoWidth && videoPlayer.videoHeight) ?
                 (videoPlayer.videoWidth / videoPlayer.videoHeight) : (16 / 9);
-
             item.imageHeight = (vid.videoHeight / vid.videoWidth) * item.imageWidth * videoAspect;
 
             track.items.push(item);
@@ -200,7 +196,6 @@ function addVideoOverlay(trackId, startTime = null) {
     };
     input.click();
 }
-
 
 function removeOverlayItem(trackId, itemId) {
     const track = getTrack(trackId);
@@ -237,9 +232,9 @@ function splitOverlayItem(trackId, itemId, splitTime) {
 
     const newId = generateOverlayId();
     const secondHalf = { ...item, id: newId, start: splitTime, duration: item.duration - relSplit };
-
     if (item.type === 'audio' || item.type === 'video') {
-        const existingOffset = item.type === 'video' ? (item.videoOffset || 0) : (item.audioOffset || 0);
+        const existingOffset = item.type === 'video' ?
+            (item.videoOffset || 0) : (item.audioOffset || 0);
         if (item.type === 'video') {
             secondHalf.videoOffset = existingOffset + relSplit;
             const vid = document.createElement('video');
@@ -306,7 +301,6 @@ function renderOverlayTracks() {
         textBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 4v3h5.5v12h3V7H19V4H5z"/></svg> Text';
         textBtn.addEventListener('click', () => addTextOverlay(track.id));
         btns.appendChild(textBtn);
-
         const imgBtn = document.createElement('button');
         imgBtn.className = 'overlay-track-btn';
         imgBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg> Image';
@@ -400,7 +394,6 @@ function renderOverlayTracks() {
             imgBtn.parentNode.replaceChild(newImgBtn, imgBtn);
             audBtn.parentNode.replaceChild(newAudBtn, audBtn);
             vidBtn.parentNode.replaceChild(newVidBtn, vidBtn);
-
             newTextBtn.addEventListener('click', () => { menu.style.display = 'none'; addTextOverlay(track.id, clickTime); });
             newImgBtn.addEventListener('click', () => { menu.style.display = 'none'; addImageOverlay(track.id, clickTime); });
             newAudBtn.addEventListener('click', () => { menu.style.display = 'none'; addAudioOverlay(track.id, clickTime); });
@@ -498,7 +491,6 @@ function renderOverlayTracks() {
                 overlayMouseDownY = e.clientY;
 
                 if (timelineDuration > 0) {
-
                     const rect = lane.getBoundingClientRect();
                     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
                     seekTo(pct * timelineDuration);
@@ -512,19 +504,16 @@ function renderOverlayTracks() {
                 const dy = Math.abs(e.clientY - overlayMouseDownY);
 
                 if (dx < 5 && dy < 5) {
-
                     e.stopPropagation();
 
                     if (typeof draggingOverlayItem !== 'undefined' && draggingOverlayItem) {
                         draggingOverlayItem = null;
                         document.body.style.cursor = '';
-
                         document.body.style.userSelect = '';
                     }
 
                     const rect = lane.getBoundingClientRect();
                     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-
                     const clickTime = pct * timelineDuration;
 
                     const addMenu = document.getElementById('inlineTrackMenu');
@@ -533,7 +522,6 @@ function renderOverlayTracks() {
                         type: 'overlay',
                         trackId: track.id,
                         itemId: item.id,
-
                         time: clickTime
                     });
                 }
@@ -543,13 +531,11 @@ function renderOverlayTracks() {
                 e.stopPropagation();
                 if (timelineDuration > 0) {
                     const rect = lane.getBoundingClientRect();
-
                     const clientX = e.touches[0].clientX;
                     const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
                     seekTo(pct * timelineDuration);
                 }
                 if (typeof startOverlayDrag === 'function') startOverlayDrag(e, track.id, item.id, lane);
-
             }, { passive: false });
 
             lane.appendChild(el);

@@ -53,9 +53,8 @@ function showInlineCutMenu(clientX, anchorRect, cutAction) {
             const seg = segments[segIdx];
             showToast('🗑️', `Removed ${formatTimePrecise(seg.start)} → ${formatTimePrecise(seg.end)}`);
 
-            if (videoPlayer.currentTime >= seg.start && videoPlayer.currentTime < seg.end) {
-                videoPlayer.currentTime = seg.end;
-                currentAppTime = videoToTimelineTime(seg.end);
+            if (currentAppTime >= seg.start && currentAppTime < seg.end) {
+                currentAppTime = seg.end;
                 updateVirtualPlayhead();
             }
             selectedSegIdx = null;
@@ -103,6 +102,7 @@ function closeOverlayEditor(eOrCancel) {
     }
     overlayEditPopover.style.display = 'none';
     editingOverlay = null;
+
     if (popoverBackdrop) {
         popoverBackdrop.remove();
         popoverBackdrop = null;
@@ -124,7 +124,7 @@ function saveOverlayEditor() {
     closeOverlayEditor(false);
     updateTimelineDuration();
     renderOverlayTracks();
-    renderOverlayPreview(videoPlayer.currentTime);
+    renderOverlayPreview(currentAppTime);
     showToast('✅', 'Overlay updated');
 }
 

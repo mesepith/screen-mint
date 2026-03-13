@@ -76,7 +76,7 @@ function renderInteractionBoxes(activeItems, layerW, layerH) {
             box.addEventListener('mousedown', (e) => {
                 if (!selectedOverlayItem || selectedOverlayItem.trackId !== trackId || selectedOverlayItem.itemId !== item.id) {
                     selectedOverlayItem = { trackId, itemId: item.id };
-                    renderOverlayPreview(videoPlayer.currentTime);
+                    renderOverlayPreview(currentAppTime);
                 }
 
                 if (e.target.classList.contains('overlay-corner-handle')) return;
@@ -116,7 +116,6 @@ function renderInteractionBoxes(activeItems, layerW, layerH) {
             toolbar.className = 'overlay-toolbar';
             toolbar.addEventListener('mousedown', (e) => e.stopPropagation());
             toolbar.addEventListener('click', (e) => e.stopPropagation());
-
             const transparencyBtn = document.createElement('button');
             transparencyBtn.className = 'overlay-toolbar-btn';
             transparencyBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31A7.903 7.903 0 0 1 12 20z"/></svg> Opacity`;
@@ -141,7 +140,7 @@ function renderInteractionBoxes(activeItems, layerW, layerH) {
                 if (currentItem) {
                     currentItem.opacity = val;
                     valueLabel.textContent = val + '%';
-                    renderOverlayPreview(videoPlayer.currentTime);
+                    renderOverlayPreview(currentAppTime);
                 }
             });
             slider.addEventListener('mousedown', (e) => {
@@ -276,7 +275,7 @@ document.addEventListener('mousemove', (e) => {
                 item.fontSize = interactionDrag.origFontSize * scale;
             }
         }
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
     }
 });
 
@@ -305,13 +304,13 @@ document.addEventListener('mouseup', () => {
 
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
     }
 });
 
 document.addEventListener('mousedown', (e) => {
     if (!e.target.closest('.overlay-img-box') && !e.target.closest('.overlay-corner-handle') && selectedOverlayItem) {
         selectedOverlayItem = null;
-        renderOverlayPreview(videoPlayer.currentTime);
+        renderOverlayPreview(currentAppTime);
     }
 });
