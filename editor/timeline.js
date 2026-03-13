@@ -35,7 +35,7 @@ function getEffectiveVideoEnd() {
     return getCompressedVideoDuration();
 }
 
-// NEW: Helper function to determine the absolute last second of playable content
+// Helper function to determine the absolute last second of playable content
 function getContentEnd() {
     let maxOverlayEnd = 0;
     for (const track of overlayTracks) {
@@ -264,27 +264,14 @@ function drawWaveform() {
         ctx.rect(0, 0, videoWidth, h);
         ctx.clip();
 
+        // 1. Draw ALL thumbnails without checking if they are removed yet
         for (let x = 0; x < w; x += thumbWidth) {
             const barTime = timelineDuration > 0 ? (x / w) * timelineDuration : 0;
             if (barTime > videoEnd) break;
 
-            let isRemoved = false;
-            for (const seg of segments) {
-                if (seg.removed && barTime >= seg.start && barTime < seg.end) {
-                    isRemoved = true;
-                    break;
-                }
-            }
-
             let drawWidth = thumbWidth;
             if (x + thumbWidth > w) {
                 drawWidth = w - x;
-            }
-
-            if (isRemoved) {
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-                ctx.fillRect(x, 0, drawWidth, thumbHeight);
-                continue;
             }
 
             let closestThumb = videoThumbnails[0];
@@ -303,8 +290,19 @@ function drawWaveform() {
             }
         }
 
+        // 2. Dim everything slightly
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.fillRect(0, 0, w, h);
+
+        // 3. Do a pixel-perfect erasure of the precise removed timeline segments
+        for (const seg of segments) {
+            if (seg.removed) {
+                const startX = timelineDuration > 0 ? (seg.start / timelineDuration) * w : 0;
+                const endX = timelineDuration > 0 ? (seg.end / timelineDuration) * w : 0;
+                ctx.clearRect(startX, 0, endX - startX, h);
+            }
+        }
+
         ctx.restore();
 
     } else {
